@@ -467,6 +467,13 @@ NSString *DHCategoryName(NSInteger c) {
     }
 }
 
+// 事件 JSON 里 input/output 的 hex/dump 上限(字节): 超大 payload(如 write 大文件)只转前 N 字节,
+// 防单条事件 JSON 巨大拖垮 Native.onEvent 分发 / 详情渲染。完整数据仍可经「下载全部日志」取。
+static const NSUInteger kEventMaxBytes = 4096;
+static NSData *DHClampData(NSData *d, NSUInteger max) {
+    return (d.length > max) ? [d subdataWithRange:NSMakeRange(0, max)] : d;
+}
+
 NSDictionary *DHEntryToJSON(DHLogEntry *e, BOOL full) {
     NSString *preview = @"";
     if (e.input.length) {
@@ -503,17 +510,21 @@ NSDictionary *DHEntryToJSON(DHLogEntry *e, BOOL full) {
     if (e.iv)     { m[@"iv"]     = @(e.iv.length);     m[@"ivHex"]     = DHHexFromData(e.iv); }
     if (e.input)  {
         m[@"input"]    = @(e.input.length);
-        m[@"inputHex"] = DHHexFromData(e.input);
-        NSString *u = DHUTF8FromData(e.input);
+        NSData *d = DHClampData(e.input, kEventMaxBytes);
+        m[@"inputHex"] = DHHexFromData(d);
+        NSString *u = DHUTF8FromData(d);
         if (![u isEqualToString:@"(非UTF-8)"]) m[@"inputUtf8"] = u;
-        m[@"inputDump"] = DHHexDumpFromData(e.input);
+        m[@"inputDump"] = DHHexDumpFromData(d);
+        if (e.input.length > kEventMaxBytes) m[@"inputTruncated"] = @YES;
     }
     if (e.output) {
         m[@"output"]    = @(e.output.length);
-        m[@"outputHex"] = DHHexFromData(e.output);
-        NSString *u = DHUTF8FromData(e.output);
+        NSData *d = DHClampData(e.output, kEventMaxBytes);
+        m[@"outputHex"] = DHHexFromData(d);
+        NSString *u = DHUTF8FromData(d);
         if (![u isEqualToString:@"(非UTF-8)"]) m[@"outputUtf8"] = u;
-        m[@"outputDump"] = DHHexDumpFromData(e.output);
+        m[@"outputDump"] = DHHexDumpFromData(d);
+        if (e.output.length > kEventMaxBytes) m[@"outputTruncated"] = @YES;
     }
     if (e.publicKeyInfo) m[@"publicKeyInfo"] = e.publicKeyInfo;
     if (e.callStack)     m[@"callStack"] = e.callStack;

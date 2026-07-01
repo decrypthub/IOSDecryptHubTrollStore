@@ -477,8 +477,8 @@ Trace.crypto({ onEvent: function(e){
       '<pre class="hex">'+escapeHTML(hex||'')+'</pre>' +
       '<div class="row-actions"><button data-copy="hex-'+label+'">复制 Hex</button></div></div>';
   }
-  function ioBody(byteLen, hex, utf8, dump, label) {
-    let b = '<div class="io-meta">'+byteLen+' bytes</div>';
+  function ioBody(byteLen, hex, utf8, dump, label, truncated) {
+    let b = '<div class="io-meta">'+byteLen+' bytes'+(truncated?' · ⚠ 仅显示前 4KB, 完整见「下载全部日志」':'')+'</div>';
     if (utf8) b += '<h3>UTF-8</h3><pre>'+escapeHTML(utf8)+'</pre>';
     b += '<h3>Hex</h3><pre class="hex">'+escapeHTML(hex||'')+'</pre>';
     if (dump) b += '<h3>HexDump</h3><pre class="hex">'+escapeHTML(dump)+'</pre>';
@@ -492,8 +492,8 @@ Trace.crypto({ onEvent: function(e){
     if (d.detail) h += '<div class="io-section kv-card"><div class="io-label kv">详情</div><pre>'+escapeHTML(d.detail)+'</pre></div>';
     if (d.key) h += ioKV('KEY', d.key, d.keyHex);
     if (d.iv)  h += ioKV('IV', d.iv, d.ivHex);
-    if (d.input)  h += '<div class="io-section in-card"><div class="io-label in">输入 / INPUT</div>'+ioBody(d.input, d.inputHex, d.inputUtf8, d.inputDump, 'INPUT')+'</div>';
-    if (d.output) h += '<div class="io-section out-card"><div class="io-label out">输出 / OUTPUT</div>'+ioBody(d.output, d.outputHex, d.outputUtf8, d.outputDump, 'OUTPUT')+'</div>';
+    if (d.input)  h += '<div class="io-section in-card"><div class="io-label in">输入 / INPUT</div>'+ioBody(d.input, d.inputHex, d.inputUtf8, d.inputDump, 'INPUT', d.inputTruncated)+'</div>';
+    if (d.output) h += '<div class="io-section out-card"><div class="io-label out">输出 / OUTPUT</div>'+ioBody(d.output, d.outputHex, d.outputUtf8, d.outputDump, 'OUTPUT', d.outputTruncated)+'</div>';
     if (d.callStack) h += '<div class="io-section"><h3>调用栈</h3><pre>'+escapeHTML(d.callStack)+'</pre></div>';
     h += '<div class="row-actions"><button data-copyall="'+d.seq+'">复制整条</button></div>';
     return h;
