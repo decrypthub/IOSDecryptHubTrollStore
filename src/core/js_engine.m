@@ -13,14 +13,13 @@
 #import <JavaScriptCore/JavaScriptCore.h>
 #import <objc/runtime.h>
 #import <os/lock.h>
+#import <time.h>
 
 // jsQueue 身份标记, 用于 dispatch_get_specific 判断「当前是否已在 jsQueue」以避免 dispatch_sync 自死锁。
 static void *kJSQueueKey = &kJSQueueKey;
 
 @interface DHJSEngine (Internal)
-- (void)invokeHookFn:(JSValue *)fn
-         argsBuilder:(NSArray *(^)(void))builder
-          resultSink:(void (^)(JSValue *result))sink;
+- (BOOL)runProtected:(void (^)(void))block;   // jsQueue + dh_in_script 内跑 block; 返回 NO=抛异常
 - (void)_jsRegisterObjCHook:(JSValue *)cfg;
 @end
 
@@ -29,7 +28,7 @@ static void *kJSQueueKey = &kJSQueueKey;
 // 把一个对象转成对 JS 友好的可读表示。调用方须已在 dh_in_script 保护内(可能触发被 hook 方法)。
 static id DHDescribeObject(id o) {
     if (!o) return @"nil";
-    if ([o isKindOfClass:[NSString class]]) return o;
+    if ([o isKindOfClass:[NSString class]]) { NSString *s = o; return (s.length > 512) ? [[s substringToIndex:512] stringByAppendingString:@"…"] : s; }
     if ([o isKindOfClass:[NSNumber class]]) return o;
     if ([o isKindOfClass:[NSData class]]) return [NSString stringWithFormat:@"<NSData %lu bytes>", (unsigned long)[(NSData *)o length]];
     if ([o isKindOfClass:[NSArray class]] || [o isKindOfClass:[NSDictionary class]]) {
@@ -164,7 +163,13 @@ static void DHApplyReturnOverride(NSInvocation *inv, JSValue *result) {
     DHWriteValue(inv, result, t, -1);
 }
 
-#pragma mark - DHScriptHook: 把引擎回调桥接到 JS onEnter/onLeave
+#pragma mark - DHScriptHook: 把引擎回调桥接到 JS onEnter/onLeave (含限频 / 自动禁用)
+
+static const int    kHookMaxPerSec   = 100;   // 每规则每秒最多触发 JS 次数, 超出放行不调 JS
+static const int    kHookMaxErrors   = 5;     // 连续异常达此数 → 自动禁用该规则
+static const double kHookWatchdogSec = 1.0;   // 单次回调耗时超此值告警(JS 无法强杀, 仅提示)
+
+static double DHMonoNow(void) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); return ts.tv_sec + ts.tv_nsec / 1e9; }
 
 @interface DHScriptHook : NSObject <DHInvocationHandler>
 - (instancetype)initWithEngine:(DHJSEngine *)e className:(NSString *)cn selector:(NSString *)sn
@@ -175,27 +180,62 @@ static void DHApplyReturnOverride(NSInvocation *inv, JSValue *result) {
     __weak DHJSEngine *_engine;
     NSString *_className, *_selName;
     JSValue  *_onEnter, *_onLeave;
+    BOOL      _disabled;
+    int       _errCount;
+    os_unfair_lock _rateLock;
+    double    _windowStart;
+    int       _windowCount, _windowDropped;
 }
 - (instancetype)initWithEngine:(DHJSEngine *)e className:(NSString *)cn selector:(NSString *)sn
                        onEnter:(JSValue *)oe onLeave:(JSValue *)ol {
     if ((self = [super init])) {
         _engine = e; _className = [cn copy]; _selName = [sn copy]; _onEnter = oe; _onLeave = ol;
+        _rateLock = OS_UNFAIR_LOCK_INIT; _windowStart = DHMonoNow();
     }
     return self;
 }
+// 每秒限频窗口: 超额返回 NO(放行不调 JS)。跨线程并发用锁保护计数。
+- (BOOL)_rateOK {
+    double now = DHMonoNow();
+    os_unfair_lock_lock(&_rateLock);
+    if (now - _windowStart >= 1.0) {
+        int dropped = _windowDropped;
+        _windowStart = now; _windowCount = 0; _windowDropped = 0;
+        os_unfair_lock_unlock(&_rateLock);
+        if (dropped > 0) [_engine emitEvent:@"warn" text:[NSString stringWithFormat:@"⏱ 规则 [%@] 上一秒限频丢弃 %d 次触发", _selName, dropped]];
+        os_unfair_lock_lock(&_rateLock);
+    }
+    BOOL ok = (_windowCount < kHookMaxPerSec);
+    if (ok) _windowCount++; else _windowDropped++;
+    os_unfair_lock_unlock(&_rateLock);
+    return ok;
+}
+- (void)_afterRun:(BOOL)ok {
+    if (ok) { _errCount = 0; return; }
+    if (++_errCount >= kHookMaxErrors) {
+        _disabled = YES;
+        [_engine emitEvent:@"warn" text:[NSString stringWithFormat:@"⛔ 规则 [%@ %@] 连续 %d 次异常, 已自动禁用", _className, _selName, _errCount]];
+    }
+}
 - (void)dhOnEnter:(NSInvocation *)inv {
-    DHJSEngine *e = _engine; if (!e || !_onEnter) return;
-    NSString *cn = _className, *sn = _selName;
-    [e invokeHookFn:_onEnter
-        argsBuilder:^NSArray *{ return @[DHDecodeArgs(inv), DHInvInfo(inv, cn, sn)]; }
-         resultSink:^(JSValue *result){ DHApplyArgOverrides(inv, result); }];
+    DHJSEngine *e = _engine; if (!e || !_onEnter || _disabled) return;
+    if (![self _rateOK]) return;
+    JSValue *fn = _onEnter; NSString *cn = _className, *sn = _selName;
+    BOOL ok = [e runProtected:^{
+        JSValue *res = [fn callWithArguments:@[DHDecodeArgs(inv), DHInvInfo(inv, cn, sn)]];
+        DHApplyArgOverrides(inv, res);
+    }];
+    [self _afterRun:ok];
 }
 - (void)dhOnLeave:(NSInvocation *)inv {
-    DHJSEngine *e = _engine; if (!e || !_onLeave) return;
-    NSString *cn = _className, *sn = _selName;
-    [e invokeHookFn:_onLeave
-        argsBuilder:^NSArray *{ return @[DHDecodeRet(inv), DHInvInfo(inv, cn, sn)]; }
-         resultSink:^(JSValue *result){ DHApplyReturnOverride(inv, result); }];
+    DHJSEngine *e = _engine; if (!e || !_onLeave || _disabled) return;
+    if (![self _rateOK]) return;
+    JSValue *fn = _onLeave; NSString *cn = _className, *sn = _selName;
+    BOOL ok = [e runProtected:^{
+        JSValue *res = [fn callWithArguments:@[DHDecodeRet(inv), DHInvInfo(inv, cn, sn)]];
+        DHApplyReturnOverride(inv, res);
+    }];
+    [self _afterRun:ok];
 }
 @end
 
@@ -328,23 +368,28 @@ static const NSUInteger kMaxEvents = 5000;   // 事件环形缓冲上限, 超出
 
 // 在 jsQueue + dh_in_script 保护下调用一个 JS hook 回调。argsBuilder 也在保护内执行
 // (解码 NSInvocation 可能触发被 hook 的方法, 需同一保护防重入)。
-- (void)invokeHookFn:(JSValue *)fn argsBuilder:(NSArray *(^)(void))builder resultSink:(void (^)(JSValue *))sink {
-    if (!fn || fn.isUndefined || fn.isNull) return;
-    if (dh_in_script) return;   // 当前线程已在脚本上下文 → 放行原方法, 防重入
+// 在 jsQueue + dh_in_script 保护下同步执行 block(调 JS + 解码 + 写回都在内)。返回 NO=block 抛异常。
+- (BOOL)runProtected:(void (^)(void))block {
+    if (dh_in_script) return YES;   // 已在脚本上下文(重入): 放行, 不重复执行
+    __block BOOL ok = YES;
     dispatch_block_t work = ^{
         if (dh_in_script) return;
         dh_in_script = 1;
+        double t0 = DHMonoNow();
         @try {
-            NSArray *a = builder ? builder() : @[];
-            JSValue *res = [fn callWithArguments:a ?: @[]];
-            if (sink) sink(res);   // 写回也在 dh_in_script + jsQueue 内(读 JSValue / 改 NSInvocation)
+            block();
         } @catch (NSException *ex) {
+            ok = NO;
             [self emitEvent:@"error" text:[NSString stringWithFormat:@"hook 回调异常: %@", ex.reason ?: @"?"]];
         }
+        double dt = DHMonoNow() - t0;
+        if (dt > kHookWatchdogSec)
+            [self emitEvent:@"warn" text:[NSString stringWithFormat:@"⏱ 一次 hook 回调耗时 %.2fs (JS 无法强制中断, 当心死循环)", dt]];
         dh_in_script = 0;
     };
     if (dispatch_get_specific(kJSQueueKey)) work();   // 已在 jsQueue: 直接跑, 避免自死锁
     else dispatch_sync(_jsQueue, work);
+    return ok;
 }
 
 // ObjC.hook 的 native 落地: 在 jsQueue 上解析 cfg, 交 DHObjCEngine 安装, 记录 DHScriptHook。
