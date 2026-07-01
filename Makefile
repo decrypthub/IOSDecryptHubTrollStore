@@ -27,13 +27,14 @@ SRC     := src/core/fishhook.c \
            src/hooks/crypto/hook_kdf.m \
            src/hooks/behavior/hook_file.m \
            src/hooks/behavior/hook_system.m \
+           src/hooks/objc/hook_objc_engine.m \
            src/server/http_server.m \
            src/ui/ui_float.m \
            src/ui/ui_logview.m \
            src/core/main.m
 
 FRAMEWORKS := -framework Foundation -framework UIKit -framework CoreGraphics -framework Security -framework JavaScriptCore
-INCLUDES   := -Isrc/core -Isrc/server -Isrc/ui
+INCLUDES   := -Isrc/core -Isrc/server -Isrc/ui -Isrc/hooks/objc
 ARCH       := arm64
 MIN_IOS    := 14.0
 

@@ -45,6 +45,9 @@ typedef enum {
 // 其内部可能再触发同类系统调用(open/dlopen 被 os_log/locale 内部调用); 置 1 时各 hook
 // 直接放行不记录, 防止递归死锁。
 extern __thread int dh_in_hook;
+// 脚本 hook 回调路径的递归保护(与 dh_in_hook 正交): JS 回调在某线程执行期间置位,
+// 期间该线程再触发被脚本 hook 的方法时直接放行原实现, 不再重入 JS。见 js_engine.m。
+extern __thread int dh_in_script;
 
 // ---- 上报失效 ----
 void dh_health_hook_fail(int board, const char *sym);  // 某符号没挂上, 归到 board 板块诊断

@@ -19,6 +19,7 @@ static char g_http_reason[128] = {0};
 static char g_summary[512]     = {0};
 
 __thread int dh_in_hook = 0;   // 见 dh_health.h: hook 记录路径的递归保护标志
+__thread int dh_in_script = 0; // 见 dh_health.h: 脚本 hook 回调的递归保护标志
 
 // ============================================================
 // 诊断日志(审查日志): 每板块独立行环形缓冲 + 各自落盘, 便于按模块定位问题
