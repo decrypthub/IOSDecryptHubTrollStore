@@ -105,6 +105,82 @@ static NSDictionary *DHInvInfo(NSInvocation *inv, NSString *cn, NSString *sn) {
     return @{@"class": cn ?: @"?", @"selector": sn ?: @"?", @"self": DHDescribeObject(inv.target)};
 }
 
+#pragma mark - ObjC 类/方法枚举 (供 ObjC.trace) + 上层 adapter prelude
+
+// 跳过系统 image 的类, 只留目标 App/注入 dylib 自己的类(否则 trace 会打爆)。
+static BOOL DHIsSystemClass(Class c) {
+    const char *img = class_getImageName(c);
+    if (!img) return YES;   // 动态生成/无镜像 → 视为系统, 跳过
+    return strstr(img, "/System/") != NULL || strstr(img, "/usr/") != NULL || strstr(img, "/Library/") != NULL;
+}
+
+// 遍历非系统类, 按类名/方法名正则匹配实例方法, 返回 [{cls, sel}] (限 limit)。
+static NSArray *DHEnumerateMatches(NSString *classPat, NSString *selPat, NSInteger limit) {
+    if (limit <= 0 || limit > 2000) limit = 300;
+    NSRegularExpression *cre = classPat.length ? [NSRegularExpression regularExpressionWithPattern:classPat options:0 error:nil] : nil;
+    NSRegularExpression *sre = selPat.length  ? [NSRegularExpression regularExpressionWithPattern:selPat  options:0 error:nil] : nil;
+    NSMutableArray *out = [NSMutableArray array];
+    unsigned int nc = 0;
+    Class *classes = objc_copyClassList(&nc);
+    for (unsigned int i = 0; i < nc && (NSInteger)out.count < limit; i++) {
+        Class c = classes[i];
+        if (DHIsSystemClass(c)) continue;
+        NSString *cn = NSStringFromClass(c);
+        if (!cn) continue;
+        if (cre && [cre numberOfMatchesInString:cn options:0 range:NSMakeRange(0, cn.length)] == 0) continue;
+        unsigned int nm = 0;
+        Method *methods = class_copyMethodList(c, &nm);
+        for (unsigned int j = 0; j < nm && (NSInteger)out.count < limit; j++) {
+            NSString *sn = NSStringFromSelector(method_getName(methods[j]));
+            if (!sn) continue;
+            if (sre && [sre numberOfMatchesInString:sn options:0 range:NSMakeRange(0, sn.length)] == 0) continue;
+            [out addObject:@{@"cls": cn, @"sel": sn}];
+        }
+        if (methods) free(methods);
+    }
+    if (classes) free(classes);
+    return out;
+}
+
+// 纯 JS 上层 adapter, 每次(重)建 context 后注入。建在 native 原语 ObjC.hook / ObjC.enumerate 之上。
+static NSString *const kDHPrelude =
+    @"(function(){\n"
+    "  ObjC.trace = function(cfg){\n"
+    "    cfg = cfg || {};\n"
+    "    var lim = cfg.limit || 300;\n"
+    "    var matches = ObjC.enumerate(cfg.classRegex||'', cfg.selectorRegex||'', lim);\n"
+    "    var oe = cfg.onEnter, ol = cfg.onLeave, n = 0;\n"
+    "    for (var i=0;i<matches.length;i++){\n"
+    "      ObjC.hook({class:matches[i].cls, selector:matches[i].sel,\n"
+    "        onEnter: oe || function(a,info){ log('→ ['+info.class+' '+info.selector+']'); },\n"
+    "        onLeave: ol});\n"
+    "      n++;\n"
+    "    }\n"
+    "    log('ObjC.trace: 匹配并 hook '+n+' 个方法'+(matches.length>=lim?' (已达上限 '+lim+', 用更精确正则缩小)':''));\n"
+    "    return n;\n"
+    "  };\n"
+    "  var Notification = { trace: function(cfg){\n"
+    "    cfg = cfg || {};\n"
+    "    var re = cfg.nameRegex ? new RegExp(cfg.nameRegex) : null, onPost = cfg.onPost;\n"
+    "    ObjC.hook({class:'NSNotificationCenter', selector:'- postNotificationName:object:userInfo:',\n"
+    "      onEnter:function(a,info){ var name=a[0];\n"
+    "        if (re && !re.test(name)) return;\n"
+    "        if (onPost) onPost({name:name, object:a[1], userInfo:a[2]});\n"
+    "        else log('📢 '+name+' userInfo='+a[2]); }});\n"
+    "    log('Notification.trace 已挂 NSNotificationCenter.postNotificationName');\n"
+    "  }};\n"
+    "  var TargetAction = { trace: function(cfg){\n"
+    "    cfg = cfg || {};\n"
+    "    var onSend = cfg.onSend;\n"
+    "    ObjC.hook({class:'UIApplication', selector:'- sendAction:to:from:forEvent:',\n"
+    "      onEnter:function(a,info){\n"
+    "        if (onSend) onSend({action:a[0], target:a[1], sender:a[2]});\n"
+    "        else log('🎯 action='+a[0]+' target='+a[1]); }});\n"
+    "    log('TargetAction.trace 已挂 UIApplication.sendAction (仅 iOS 有效)');\n"
+    "  }};\n"
+    "  this.Notification = Notification; this.TargetAction = TargetAction;\n"
+    "})();\n";
+
 #pragma mark - JS 值 → NSInvocation 参数/返回值 写回 (Step 2: 改参 + 改返回)
 
 // 把一个 JS 值按类型编码写回(argIdx>=0 写参数, <0 写返回值)。返回是否支持写回。
@@ -303,7 +379,16 @@ static const NSUInteger kMaxEvents = 5000;   // 事件环形缓冲上限, 超出
         DHJSEngine *s = ws; if (!s) return;
         [s _jsRegisterObjCHook:cfg];
     };
+    objcNS[@"enumerate"] = ^id(JSValue *classRe, JSValue *selRe, JSValue *limit) {
+        NSString *cp = classRe.isString ? [classRe toString] : nil;
+        NSString *sp = selRe.isString  ? [selRe toString]  : nil;
+        NSInteger lim = limit.isNumber ? (NSInteger)[limit toInt32] : 300;
+        return DHEnumerateMatches(cp, sp, lim);
+    };
     _ctx[@"ObjC"] = objcNS;
+
+    // 上层 adapter(纯 JS): ObjC.trace / Notification.trace / TargetAction.trace
+    [_ctx evaluateScript:kDHPrelude];
 }
 
 - (NSDictionary *)runScript:(NSString *)src {
