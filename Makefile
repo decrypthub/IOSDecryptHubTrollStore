@@ -15,6 +15,7 @@ SRC     := src/core/fishhook.c \
            src/core/dh_health.c \
            src/core/dh_capture.c \
            src/core/dh_symtab.c \
+           src/core/js_engine.m \
            src/core/log_store.m \
            src/core/zip_writer.c \
            src/core/macho_dump.m \
@@ -31,7 +32,7 @@ SRC     := src/core/fishhook.c \
            src/ui/ui_logview.m \
            src/core/main.m
 
-FRAMEWORKS := -framework Foundation -framework UIKit -framework CoreGraphics -framework Security
+FRAMEWORKS := -framework Foundation -framework UIKit -framework CoreGraphics -framework Security -framework JavaScriptCore
 INCLUDES   := -Isrc/core -Isrc/server -Isrc/ui
 ARCH       := arm64
 MIN_IOS    := 14.0
@@ -93,7 +94,7 @@ MAC_TARGET := decrypt_helper.mac.dylib
 MAC_SDK    := $(shell xcrun --sdk macosx --show-sdk-path 2>/dev/null)
 MAC_ARCH   := $(shell uname -m)
 MAC_MIN    := 11.0
-MAC_FRAMEWORKS := -framework Foundation -framework CoreFoundation -framework Security
+MAC_FRAMEWORKS := -framework Foundation -framework CoreFoundation -framework Security -framework JavaScriptCore
 MAC_CFLAGS := -arch $(MAC_ARCH) \
               -isysroot $(MAC_SDK) \
               -mmacosx-version-min=$(MAC_MIN) \

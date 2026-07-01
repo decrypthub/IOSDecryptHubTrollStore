@@ -30,6 +30,7 @@
 #import "ui_float.h"
 #import "dump_manager.h"
 #import "dh_symtab.h"
+#import "js_engine.h"
 
 #define DH_HTTP_PORT_FIRST  8088
 #define DH_HTTP_PORT_LAST   8108
@@ -585,6 +586,28 @@ static void handle_symbols(int fd, NSDictionary *q) {
     });
 }
 
+// ===== JS 脚本 Hook 调试器 (DHJSEngine) =====
+// POST /api/script/run  (body = JS 源码) —— 进程内 JavaScriptCore 执行。
+static void handle_script_run(int fd, NSData *body) {
+    NSString *src = body.length ? [[NSString alloc] initWithData:body encoding:NSUTF8StringEncoding] : nil;
+    if (src.length == 0) { send_json(fd, 400, @{@"error": @"empty script"}); return; }
+    send_json(fd, 200, [[DHJSEngine shared] runScript:src]);
+}
+// POST /api/script/stop —— 复位引擎(重建 JSContext, 卸载规则)。
+static void handle_script_stop(int fd) {
+    [[DHJSEngine shared] stop];
+    send_json(fd, 200, @{@"ok": @YES});
+}
+// GET /api/script/status
+static void handle_script_status(int fd) {
+    send_json(fd, 200, [[DHJSEngine shared] status]);
+}
+// GET /api/script/events?since=SEQ —— 键集分页拉脚本事件(log/异常/hook 事件)。
+static void handle_script_events(int fd, NSDictionary *q) {
+    uint64_t since = q[@"since"] ? (uint64_t)[q[@"since"] longLongValue] : 0;
+    send_json(fd, 200, [[DHJSEngine shared] eventsSince:since max:500]);
+}
+
 static void handle_index(int fd) {
     NSData *body = [NSData dataWithBytes:kDHIndexHTML length:kDHIndexHTML_len];   // 字节数组, 非 NUL 结尾
     send_response(fd, 200, @"OK", @"text/html; charset=utf-8", body);
@@ -625,6 +648,33 @@ static void handle_connection(int fd) {
     else { path = [target substringToIndex:qrange.location]; qs = [target substringFromIndex:qrange.location + 1]; }
     NSDictionary *q = parse_query(qs);
 
+    // 读取 POST body(如有): 上面在遇到 "\r\n\r\n" 处 break, body 可能已随 header 一起到达 buf,
+    // 先取已读的 body 前缀, 再按 Content-Length 补 recv(限 1MB)。仅 /api/script/run 等 POST 需要。
+    NSData *body = nil;
+    {
+        const void *hp = memmem(buf.bytes, buf.length, "\r\n\r\n", 4);
+        NSUInteger headerEnd = hp ? ((const uint8_t *)hp - (const uint8_t *)buf.bytes) + 4 : buf.length;
+        NSUInteger contentLen = 0;
+        for (NSString *line in lines) {
+            if ([[line lowercaseString] hasPrefix:@"content-length:"]) {
+                contentLen = (NSUInteger)[[line substringFromIndex:15] integerValue];
+                break;
+            }
+        }
+        if (contentLen > 0 && contentLen <= 1024 * 1024) {
+            NSUInteger already = buf.length - headerEnd;
+            if (already > contentLen) already = contentLen;
+            NSMutableData *bd = [NSMutableData dataWithBytes:(const uint8_t *)buf.bytes + headerEnd length:already];
+            while (bd.length < contentLen) {
+                char btmp[4096];
+                ssize_t rn = recv(fd, btmp, MIN((NSUInteger)sizeof(btmp), contentLen - bd.length), 0);
+                if (rn <= 0) { if (rn < 0 && errno == EINTR) continue; break; }
+                [bd appendBytes:btmp length:(NSUInteger)rn];
+            }
+            body = bd;
+        }
+    }
+
     @try {
         if ([method isEqualToString:@"GET"]) {
             if ([path isEqualToString:@"/"] || [path isEqualToString:@"/index.html"]) {
@@ -659,6 +709,10 @@ static void handle_connection(int fd) {
                 handle_symbols_images(fd);
             } else if ([path isEqualToString:@"/api/symbols"]) {
                 handle_symbols(fd, q);
+            } else if ([path isEqualToString:@"/api/script/status"]) {
+                handle_script_status(fd);
+            } else if ([path isEqualToString:@"/api/script/events"]) {
+                handle_script_events(fd, q);
             } else if ([path isEqualToString:@"/favicon.ico"]) {
                 send_response(fd, 204, @"No Content", @"image/x-icon", [NSData data]);
             } else {
@@ -675,6 +729,10 @@ static void handle_connection(int fd) {
                 handle_config_set(fd, q);
             } else if ([path isEqualToString:@"/api/dump"]) {
                 handle_dump_start(fd, q);
+            } else if ([path isEqualToString:@"/api/script/run"]) {
+                handle_script_run(fd, body);
+            } else if ([path isEqualToString:@"/api/script/stop"]) {
+                handle_script_stop(fd);
             } else {
                 send_text(fd, 404, @"not found");
             }

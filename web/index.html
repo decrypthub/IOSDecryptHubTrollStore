@@ -175,6 +175,7 @@
   <button class='tab' data-tab='sys'>系统<span class='n' id='n-sys'></span></button>
   <button class='tab' data-tab='symbols'>符号</button>
   <button class='tab' data-tab='dump'>砸壳</button>
+  <button class='tab' data-tab='script'>脚本</button>
 </nav>
 <div class='filters' id='toolbar'>
   <span id='catWrap'><label>分类</label>
@@ -238,6 +239,20 @@
       <thead><tr><th style='width:48px;'>#</th><th>导入符号 (均为 fishhook 候选)</th></tr></thead>
       <tbody id='symListBody'><tr><td colspan='2' style='color:#6e7681;'>加载中…</td></tr></tbody>
     </table>
+  </div>
+</div>
+<div id='scriptPane' class='dumppane' style='display:none;'>
+  <div class='dumpwrap' style='max-width:100%;'>
+    <h2>JS 脚本 Hook 调试器</h2>
+    <div class='note'>在目标进程内用 <b>JavaScriptCore</b> 执行你的脚本, 用来动态安装 ObjC/符号 hook(逐步开放)。当前可用: <b>log(...)</b> 输出到下方事件区。<br><span class='warn-note'>⚠ 仅在自有/授权 App 内使用;脚本在目标进程内<b>同步</b>执行, 死循环可能卡住 App —— 只跑你信任的脚本。</span></div>
+    <div class='dump-actions'>
+      <button id='scriptRun' class='primary'>▶ 运行</button>
+      <button id='scriptStop'>停止 / 复位</button>
+      <button id='scriptClear'>清空输出</button>
+    </div>
+    <textarea id='scriptEdit' spellcheck='false' style='width:100%; height:200px; background:#0d1117; color:#c9d1d9; border:1px solid #30363d; border-radius:6px; padding:10px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size:12px; line-height:1.5; resize:vertical;'>log('hello from JavaScriptCore');</textarea>
+    <h3 class='sym-h3' style='margin-top:14px;'>事件输出 <span id='scriptEvtCount' style='color:#6e7681; font-weight:400;'></span></h3>
+    <pre id='scriptLog' style='background:#0d1117; border:1px solid #21262d; border-radius:6px; padding:10px 12px; margin:0; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size:11px; line-height:1.55; max-height:340px; min-height:90px; overflow:auto; white-space:pre-wrap; word-break:break-all; color:#c9d1d9;'></pre>
   </div>
 </div>
 <div class='modal-mask' id='diagMask'>
@@ -514,10 +529,13 @@
     const isLog = LOG_TABS.includes(name);
     $('dumpPane').style.display = (name==='dump') ? 'flex' : 'none';
     $('symPane').style.display  = (name==='symbols') ? 'flex' : 'none';
+    $('scriptPane').style.display = (name==='script') ? 'flex' : 'none';
+    if (name!=='script' && scriptPolling) { clearInterval(scriptPolling); scriptPolling=null; }
     document.querySelector('.workspace').style.display = isLog ? 'flex' : 'none';
     $('toolbar').style.display = isLog ? 'flex' : 'none';
     if (name==='dump') { loadDumpImages(); pollDump(); return; }
     if (name==='symbols') { loadSymbols(); return; }
+    if (name==='script') { loadScript(); return; }
     $('catWrap').style.display = (name==='crypto') ? '' : 'none';
     $('minWrap').style.display = (name==='crypto') ? '' : 'none';
     $('q').value = (tabState[name]||{}).q || '';
@@ -601,6 +619,46 @@
     } catch(e){ $('symListBody').innerHTML = '<tr><td colspan="2">'+escapeHTML(e.message)+'</td></tr>'; }
   }
 
+  // ---- JS 脚本 Hook 调试器 ----
+  let scriptEvtSeq = 0, scriptPolling = null, scriptLoaded = false;
+  function scriptAppendEvents(events){
+    if (!events || !events.length) return;
+    const pre = $('scriptLog');
+    const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 24;
+    const txt = events.map(e => '['+String(e.ts||'').replace(/^.* /,'')+'] '+(e.level||'log')+'  '+(e.text||'')).join('\n');
+    pre.textContent += (pre.textContent ? '\n' : '') + txt;
+    if (atBottom) pre.scrollTop = pre.scrollHeight;
+  }
+  async function pollScriptEvents(){
+    try {
+      const d = await fetchJSON('/api/script/events?since='+scriptEvtSeq);
+      scriptAppendEvents(d.events);
+      if (d.lastSeq!=null) scriptEvtSeq = d.lastSeq;
+      $('scriptEvtCount').textContent = (d.total!=null) ? '· 累计 '+d.total+' 条' : '';
+    } catch(e){ /* 断连: 不清空已显示输出 */ }
+  }
+  function loadScript(){
+    if (!scriptLoaded){ const saved = localStorage.getItem('dh_script_src'); if (saved) $('scriptEdit').value = saved; scriptLoaded = true; }
+    if (scriptPolling) clearInterval(scriptPolling);
+    scriptPolling = setInterval(pollScriptEvents, 1000);
+    pollScriptEvents();
+  }
+  async function runScript(){
+    const src = $('scriptEdit').value;
+    if (!src.trim()) { toast('脚本为空'); return; }
+    localStorage.setItem('dh_script_src', src);
+    try {
+      const r = await fetch('/api/script/run', {method:'POST', body:src});
+      let d = {}; try { d = await r.json(); } catch(_){}
+      if (!r.ok || d.error || d.ok===false) toast('运行报错, 看事件区'); else toast('已执行');
+      pollScriptEvents();
+    } catch(e){ toast('运行失败: '+e.message); }
+  }
+  async function stopScript(){
+    try { await fetch('/api/script/stop',{method:'POST'}); toast('已停止并复位'); setTimeout(pollScriptEvents, 120); }
+    catch(e){ toast('停止失败: '+e.message); }
+  }
+
   // ---- 设置 (日志保留条数 / 落盘上限 / 下载 / 清空) ----
   async function loadConfig(){
     try {
@@ -678,6 +736,9 @@
   $('symRefresh').addEventListener('click', loadSymbols);
   $('symImgSel').addEventListener('change', loadSymList);
   let symQTimer; $('symQ').addEventListener('input', () => { clearTimeout(symQTimer); symQTimer=setTimeout(loadSymList,200); });
+  $('scriptRun').addEventListener('click', runScript);
+  $('scriptStop').addEventListener('click', stopScript);
+  $('scriptClear').addEventListener('click', () => { $('scriptLog').textContent=''; });
   (function(){
     const sp=$('splitter'), lp=$('list'), wsEl=document.querySelector('.workspace'); let dragging=false;
     sp.addEventListener('mousedown', e => { dragging=true; sp.classList.add('dragging'); document.body.style.userSelect='none'; e.preventDefault(); });
