@@ -244,13 +244,24 @@
 <div id='scriptPane' class='dumppane' style='display:none;'>
   <div class='dumpwrap' style='max-width:100%;'>
     <h2>JS 脚本 Hook 调试器</h2>
-    <div class='note'>在目标进程内用 <b>JavaScriptCore</b> 执行你的脚本, 用来动态安装 ObjC/符号 hook(逐步开放)。当前可用: <b>log(...)</b> 输出到下方事件区。<br><span class='warn-note'>⚠ 仅在自有/授权 App 内使用;脚本在目标进程内<b>同步</b>执行, 死循环可能卡住 App —— 只跑你信任的脚本。</span></div>
+    <div class='note'>在目标进程内用 <b>JavaScriptCore</b> 执行脚本, 动态安装 hook。可用 API:
+      <br>• <b>ObjC.hook</b>({class, selector:'- foo:', onEnter, onLeave}) — onEnter 返回数组改参数, onLeave 返回值改返回值
+      <br>• <b>ObjC.trace</b>({classRegex, selectorRegex, limit}) — 正则批量 hook(仅非系统类)
+      <br>• <b>Notification.trace</b>({nameRegex, onPost}) / <b>TargetAction.trace</b>({onSend}) — 事件链观测(仅 iOS)
+      <br>• <b>Sym.hookKnown</b>('send'|'recv'|'SecItemCopyMatching', {onEnter}) — C 符号只读观测
+      <br>• <b>log</b>(...) — 输出到下方事件区
+      <br><span class='warn-note'>⚠ 仅在自有/授权 App 内使用; 脚本在目标进程内<b>同步</b>执行, 死循环可能卡住 App —— 只跑你信任的脚本。</span></div>
     <div class='dump-actions'>
       <button id='scriptRun' class='primary'>▶ 运行</button>
       <button id='scriptStop'>停止 / 复位</button>
       <button id='scriptClear'>清空输出</button>
     </div>
-    <textarea id='scriptEdit' spellcheck='false' style='width:100%; height:200px; background:#0d1117; color:#c9d1d9; border:1px solid #30363d; border-radius:6px; padding:10px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size:12px; line-height:1.5; resize:vertical;'>log('hello from JavaScriptCore');</textarea>
+    <textarea id='scriptEdit' spellcheck='false' style='width:100%; height:200px; background:#0d1117; color:#c9d1d9; border:1px solid #30363d; border-radius:6px; padding:10px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size:12px; line-height:1.5; resize:vertical;'>// 示例: hook 类方法读取返回值
+ObjC.hook({
+  class: 'NSDate',
+  selector: '+ date',
+  onLeave: function(ret, info){ log('NSDate.date =>', ret); }
+});</textarea>
     <h3 class='sym-h3' style='margin-top:14px;'>事件输出 <span id='scriptEvtCount' style='color:#6e7681; font-weight:400;'></span></h3>
     <pre id='scriptLog' style='background:#0d1117; border:1px solid #21262d; border-radius:6px; padding:10px 12px; margin:0; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size:11px; line-height:1.55; max-height:340px; min-height:90px; overflow:auto; white-space:pre-wrap; word-break:break-all; color:#c9d1d9;'></pre>
   </div>

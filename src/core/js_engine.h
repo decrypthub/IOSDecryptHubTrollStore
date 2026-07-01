@@ -35,6 +35,9 @@ NS_ASSUME_NONNULL_BEGIN
 // 线程安全, 可在任意线程(含 hook 现场)调用。
 - (void)emitEvent:(NSString *)level text:(nullable NSString *)text;
 
+// 供 C 符号 thunk(hook_symbol_api.m) 把参数快照回流到已注册的 Sym.hookKnown 回调。
+- (void)symbolEvent:(NSString *)name args:(NSArray *)args;
+
 @end
 
 NS_ASSUME_NONNULL_END

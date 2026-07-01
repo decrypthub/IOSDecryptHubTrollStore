@@ -28,6 +28,7 @@ SRC     := src/core/fishhook.c \
            src/hooks/behavior/hook_file.m \
            src/hooks/behavior/hook_system.m \
            src/hooks/objc/hook_objc_engine.m \
+           src/hooks/objc/hook_symbol_api.m \
            src/server/http_server.m \
            src/ui/ui_float.m \
            src/ui/ui_logview.m \

@@ -10,6 +10,7 @@
 #import "log_store.h"          // DHTimestampNow
 #import "dh_health.h"          // dh_in_script
 #import "hook_objc_engine.h"
+#import "hook_symbol_api.h"
 #import <JavaScriptCore/JavaScriptCore.h>
 #import <objc/runtime.h>
 #import <os/lock.h>
@@ -21,6 +22,7 @@ static void *kJSQueueKey = &kJSQueueKey;
 @interface DHJSEngine (Internal)
 - (BOOL)runProtected:(void (^)(void))block;   // jsQueue + dh_in_script 内跑 block; 返回 NO=抛异常
 - (void)_jsRegisterObjCHook:(JSValue *)cfg;
+- (void)_jsRegisterSymbolHook:(JSValue *)nameV cfg:(JSValue *)cfg;
 @end
 
 #pragma mark - NSInvocation 参数/返回值 → JS 值 解码 (Step 1: 只读)
@@ -322,6 +324,8 @@ static const NSUInteger kMaxEvents = 5000;   // 事件环形缓冲上限, 超出
     JSContext         *_ctx;
     NSString          *_pendingError;   // 仅 _jsQueue 内访问: 本次 evaluateScript 是否抛异常
     NSMutableArray    *_hooks;          // 强引用所有 DHScriptHook, 防释放; stop 时清
+    NSMutableDictionary *_symHooks;     // 符号名 → onEnter JSValue (Sym.hookKnown); 受 _symLock 保护
+    os_unfair_lock     _symLock;
 
     os_unfair_lock     _evLock;
     NSMutableArray<NSDictionary *> *_events;   // 受 _evLock 保护
@@ -342,7 +346,9 @@ static const NSUInteger kMaxEvents = 5000;   // 事件环形缓冲上限, 超出
         dispatch_queue_set_specific(_jsQueue, kJSQueueKey, kJSQueueKey, NULL);
         _evLock  = OS_UNFAIR_LOCK_INIT;
         _events  = [NSMutableArray array];
-        _hooks   = [NSMutableArray array];
+        _hooks    = [NSMutableArray array];
+        _symHooks = [NSMutableDictionary dictionary];
+        _symLock  = OS_UNFAIR_LOCK_INIT;
         _evSeq   = 0;
         _evTotal = 0;
         dispatch_sync(_jsQueue, ^{ [self _setupContextLocked]; });
@@ -387,6 +393,14 @@ static const NSUInteger kMaxEvents = 5000;   // 事件环形缓冲上限, 超出
     };
     _ctx[@"ObjC"] = objcNS;
 
+    // Symbol 命名空间(用 Sym 避开 JS 内置 Symbol): Sym.hookKnown(name, {onEnter})
+    JSValue *symNS = [JSValue valueWithNewObjectInContext:_ctx];
+    symNS[@"hookKnown"] = ^(JSValue *name, JSValue *cfg) {
+        DHJSEngine *s = ws; if (!s) return;
+        [s _jsRegisterSymbolHook:name cfg:cfg];
+    };
+    _ctx[@"Sym"] = symNS;
+
     // 上层 adapter(纯 JS): ObjC.trace / Notification.trace / TargetAction.trace
     [_ctx evaluateScript:kDHPrelude];
 }
@@ -408,7 +422,8 @@ static const NSUInteger kMaxEvents = 5000;   // 事件环形缓冲上限, 超出
 }
 
 - (void)stop {
-    [[DHObjCEngine shared] unhookAll];        // 先停止一切 hook 触发
+    [[DHObjCEngine shared] unhookAll];        // 先停止一切 ObjC hook 触发
+    os_unfair_lock_lock(&_symLock); [_symHooks removeAllObjects]; os_unfair_lock_unlock(&_symLock);  // 符号 thunk 无法卸载, 但清回调后不再调 JS
     dispatch_sync(_jsQueue, ^{
         [self->_hooks removeAllObjects];
         [self _setupContextLocked];           // 重建 context, 丢弃用户全局态
@@ -504,6 +519,30 @@ static const NSUInteger kMaxEvents = 5000;   // 事件环形缓冲上限, 超出
     if (err) { [self emitEvent:@"error" text:[NSString stringWithFormat:@"ObjC.hook 失败: %@", err]]; return; }
     [_hooks addObject:hook];
     [self emitEvent:@"event" text:[NSString stringWithFormat:@"✔ 已 hook %@[%@ %@]", isClass ? @"+" : @"-", className, selName]];
+}
+
+// Sym.hookKnown 的 native 落地: 校验白名单, 记录 onEnter, fishhook 安装 thunk。
+- (void)_jsRegisterSymbolHook:(JSValue *)nameV cfg:(JSValue *)cfg {
+    NSString *name = [nameV toString];
+    if (name.length == 0) { [self emitEvent:@"error" text:@"Sym.hookKnown 需要符号名"]; return; }
+    if (!dh_symbol_known(name.UTF8String)) {
+        [self emitEvent:@"error" text:[NSString stringWithFormat:@"未知符号 %@; 内置模板仅支持: send / recv / SecItemCopyMatching", name]];
+        return;
+    }
+    JSValue *oe = (cfg && cfg.isObject) ? cfg[@"onEnter"] : nil;
+    if (!oe || oe.isUndefined || oe.isNull) { [self emitEvent:@"error" text:@"Sym.hookKnown 需要 onEnter 回调"]; return; }
+    os_unfair_lock_lock(&_symLock); _symHooks[name] = oe; os_unfair_lock_unlock(&_symLock);
+    dh_symbol_install(name.UTF8String);
+    [self emitEvent:@"event" text:[NSString stringWithFormat:@"✔ 已 hook 符号 %@() (只读观测)", name]];
+}
+
+- (void)symbolEvent:(NSString *)name args:(NSArray *)args {
+    JSValue *oe;
+    os_unfair_lock_lock(&_symLock); oe = _symHooks[name]; os_unfair_lock_unlock(&_symLock);
+    if (!oe || oe.isUndefined || oe.isNull) return;
+    [self runProtected:^{
+        [oe callWithArguments:@[args ?: @[], @{@"symbol": name}]];
+    }];
 }
 
 @end
