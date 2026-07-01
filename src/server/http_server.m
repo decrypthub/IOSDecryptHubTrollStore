@@ -97,18 +97,6 @@ static NSDictionary *parse_query(NSString *qs) {
     return out;
 }
 
-static const char *category_name(NSInteger c) {
-    switch (c) {
-        case DHCategoryDigest:     return "digest";
-        case DHCategoryHMAC:       return "hmac";
-        case DHCategorySymmetric:  return "sym";
-        case DHCategoryAsymmetric: return "asym";
-        case DHCategoryFile:       return "file";
-        case DHCategorySystem:     return "sys";
-        default: return "other";
-    }
-}
-
 // ============================================================
 // I/O helpers
 // ============================================================
@@ -161,63 +149,6 @@ static void send_text(int fd, int status, NSString *msg) {
 // ============================================================
 // 路由 handlers
 // ============================================================
-static NSDictionary *entry_summary(DHLogEntry *e) {
-    NSString *preview = nil;
-    if (e.input.length) {
-        // 预览取前 256 字节足以填满一整行(前端单行 + 按可见宽度自动省略);
-        // 整体解码后按字符截断, 避免在多字节 UTF-8 中点切断导致整体回退成乱码
-        NSUInteger cap = MIN(e.input.length, (NSUInteger)256);
-        NSString *u = nil;
-        for (NSUInteger n = cap; n >= (cap > 3 ? cap - 3 : 1); n--) {   // 末尾多字节字符可能被切断, 回退最多 3 字节
-            u = [[NSString alloc] initWithData:[e.input subdataWithRange:NSMakeRange(0, n)] encoding:NSUTF8StringEncoding];
-            if (u) break;
-        }
-        if (u.length) {
-            BOOL more = e.input.length > cap || u.length > 200;
-            if (u.length > 200) u = [u substringToIndex:200];
-            preview = more ? [u stringByAppendingString:@"…"] : u;
-        } else {
-            NSData *d = e.input.length > 32 ? [e.input subdataWithRange:NSMakeRange(0, 32)] : e.input;
-            preview = DHHexFromData(d);
-        }
-    }
-    return @{
-        @"seq":        @(e.seq),
-        @"category":   @(e.category),
-        @"categoryName": @(category_name(e.category)),
-        @"algorithm":  e.algorithm ?: @"",
-        @"operation":  e.operation ?: @"",
-        @"timestamp":  e.timestamp ?: @"",
-        @"inLen":      @(e.input.length),
-        @"outLen":     @(e.output.length),
-        @"detail":     e.detail ?: @"",
-        @"preview":    preview ?: @"",
-    };
-}
-
-static NSDictionary *entry_detail(DHLogEntry *e) {
-    NSMutableDictionary *m = [entry_summary(e) mutableCopy] ?: [NSMutableDictionary dictionary];
-    if (e.key)    { m[@"key"]    = @(e.key.length);    m[@"keyHex"]    = DHHexFromData(e.key); }
-    if (e.iv)     { m[@"iv"]     = @(e.iv.length);     m[@"ivHex"]     = DHHexFromData(e.iv); }
-    if (e.input)  {
-        m[@"input"]    = @(e.input.length);
-        m[@"inputHex"] = DHHexFromData(e.input);
-        NSString *u = DHUTF8FromData(e.input);
-        if (![u isEqualToString:@"(非UTF-8)"]) m[@"inputUtf8"] = u;
-        m[@"inputDump"] = DHHexDumpFromData(e.input);
-    }
-    if (e.output) {
-        m[@"output"]    = @(e.output.length);
-        m[@"outputHex"] = DHHexFromData(e.output);
-        NSString *u = DHUTF8FromData(e.output);
-        if (![u isEqualToString:@"(非UTF-8)"]) m[@"outputUtf8"] = u;
-        m[@"outputDump"] = DHHexDumpFromData(e.output);
-    }
-    if (e.publicKeyInfo) m[@"publicKeyInfo"] = e.publicKeyInfo;
-    if (e.callStack)     m[@"callStack"] = e.callStack;
-    return m;
-}
-
 static void handle_stats(int fd) {
     DHLogStore *s = [DHLogStore shared];
     NSArray *byCat = @[
@@ -281,7 +212,7 @@ static void handle_logs_list(int fd, NSDictionary *q) {
         DHLogEntry *e = src[i];
         if (since  && e.seq <= since)  continue;
         if (before && e.seq >= before) continue;
-        [out addObject:entry_summary(e)];
+        [out addObject:DHEntryToJSON(e, NO)];
     }
     send_json(fd, 200, out);
 }
@@ -290,7 +221,7 @@ static void handle_log_detail(int fd, NSString *seqStr) {
     uint64_t seq = (uint64_t)[seqStr longLongValue];
     DHLogEntry *e = [[DHLogStore shared] entryWithSeq:seq];
     if (!e) { send_json(fd, 404, @{@"error": @"not found"}); return; }
-    send_json(fd, 200, entry_detail(e));
+    send_json(fd, 200, DHEntryToJSON(e, YES));
 }
 
 static void handle_clear(int fd, NSDictionary *q) {

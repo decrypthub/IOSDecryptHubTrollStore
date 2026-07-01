@@ -23,6 +23,8 @@ static void *kJSQueueKey = &kJSQueueKey;
 - (BOOL)runProtected:(void (^)(void))block;   // jsQueue + dh_in_script 内跑 block; 返回 NO=抛异常
 - (void)_jsRegisterObjCHook:(JSValue *)cfg;
 - (void)_jsRegisterSymbolHook:(JSValue *)nameV cfg:(JSValue *)cfg;
+- (void)_jsAddNativeCallback:(JSValue *)fn;
+- (void)onNativeEntry:(DHLogEntry *)e;
 @end
 
 #pragma mark - NSInvocation 参数/返回值 → JS 值 解码 (Step 1: 只读)
@@ -246,6 +248,7 @@ static void DHApplyReturnOverride(NSInvocation *inv, JSValue *result) {
 static const int    kHookMaxPerSec   = 100;   // 每规则每秒最多触发 JS 次数, 超出放行不调 JS
 static const int    kHookMaxErrors   = 5;     // 连续异常达此数 → 自动禁用该规则
 static const double kHookWatchdogSec = 1.0;   // 单次回调耗时超此值告警(JS 无法强杀, 仅提示)
+static const int    kNativeMaxPerSec = 200;   // native 事件每秒分发上限(防高频 write/send 爆 jsQueue)
 
 static double DHMonoNow(void) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); return ts.tv_sec + ts.tv_nsec / 1e9; }
 
@@ -327,6 +330,11 @@ static const NSUInteger kMaxEvents = 5000;   // 事件环形缓冲上限, 超出
     NSMutableDictionary *_symHooks;     // 符号名 → onEnter JSValue (Sym.hookKnown); 受 _symLock 保护
     os_unfair_lock     _symLock;
 
+    NSMutableArray    *_nativeCallbacks;   // Native.onEvent 回调(JSValue), 仅 jsQueue 访问
+    os_unfair_lock     _natRateLock;       // native 事件分发限频
+    double             _natWindowStart;
+    int                _natWindowCount, _natWindowDropped;
+
     os_unfair_lock     _evLock;
     NSMutableArray<NSDictionary *> *_events;   // 受 _evLock 保护
     uint64_t           _evSeq;                 // 事件自增序号, 受 _evLock 保护
@@ -349,6 +357,9 @@ static const NSUInteger kMaxEvents = 5000;   // 事件环形缓冲上限, 超出
         _hooks    = [NSMutableArray array];
         _symHooks = [NSMutableDictionary dictionary];
         _symLock  = OS_UNFAIR_LOCK_INIT;
+        _nativeCallbacks = [NSMutableArray array];
+        _natRateLock = OS_UNFAIR_LOCK_INIT;
+        _natWindowStart = DHMonoNow();
         _evSeq   = 0;
         _evTotal = 0;
         dispatch_sync(_jsQueue, ^{ [self _setupContextLocked]; });
@@ -401,6 +412,14 @@ static const NSUInteger kMaxEvents = 5000;   // 事件环形缓冲上限, 超出
     };
     _ctx[@"Sym"] = symNS;
 
+    // Native 命名空间: Native.onEvent(fn) 订阅 native 抓取的结构化事件流(crypto/file/system…)
+    JSValue *nativeNS = [JSValue valueWithNewObjectInContext:_ctx];
+    nativeNS[@"onEvent"] = ^(JSValue *fn) {
+        DHJSEngine *s = ws; if (!s) return;
+        [s _jsAddNativeCallback:fn];
+    };
+    _ctx[@"Native"] = nativeNS;
+
     // 上层 adapter(纯 JS): ObjC.trace / Notification.trace / TargetAction.trace
     [_ctx evaluateScript:kDHPrelude];
 }
@@ -424,11 +443,13 @@ static const NSUInteger kMaxEvents = 5000;   // 事件环形缓冲上限, 超出
 - (void)stop {
     [[DHObjCEngine shared] unhookAll];        // 先停止一切 ObjC hook 触发
     os_unfair_lock_lock(&_symLock); [_symHooks removeAllObjects]; os_unfair_lock_unlock(&_symLock);  // 符号 thunk 无法卸载, 但清回调后不再调 JS
+    [DHLogStore shared].eventObserver = nil;  // 摘掉 native 旁路, 回归零开销
     dispatch_sync(_jsQueue, ^{
         [self->_hooks removeAllObjects];
+        [self->_nativeCallbacks removeAllObjects];
         [self _setupContextLocked];           // 重建 context, 丢弃用户全局态
     });
-    [self emitEvent:@"event" text:@"⏹ 已停止并复位引擎(卸载全部 hook)"];
+    [self emitEvent:@"event" text:@"⏹ 已停止并复位引擎(卸载全部 hook + 事件订阅)"];
 }
 
 - (NSDictionary *)status {
@@ -543,6 +564,49 @@ static const NSUInteger kMaxEvents = 5000;   // 事件环形缓冲上限, 超出
     [self runProtected:^{
         [oe callWithArguments:@[args ?: @[], @{@"symbol": name}]];
     }];
+}
+
+#pragma mark - Native 事件订阅 (Native.onEvent, 阶段2 EventBus)
+
+- (void)_jsAddNativeCallback:(JSValue *)fn {
+    if (!fn || fn.isUndefined || fn.isNull) { [self emitEvent:@"error" text:@"Native.onEvent 需要一个函数"]; return; }
+    [_nativeCallbacks addObject:fn];
+    if (_nativeCallbacks.count == 1) {   // 首个订阅: 挂上 log_store 旁路(此前 observer=nil, 零开销)
+        __weak DHJSEngine *ws = self;
+        [DHLogStore shared].eventObserver = ^(DHLogEntry *e) {
+            DHJSEngine *s = ws; if (s) [s onNativeEntry:e];
+        };
+    }
+    [self emitEvent:@"event" text:@"✔ 已订阅 native 结构化事件流(Native.onEvent)"];
+}
+
+// native 事件限频(在日志队列线程判断, 快)。
+- (BOOL)_natRateOK {
+    double now = DHMonoNow();
+    os_unfair_lock_lock(&_natRateLock);
+    if (now - _natWindowStart >= 1.0) {
+        int dropped = _natWindowDropped;
+        _natWindowStart = now; _natWindowCount = 0; _natWindowDropped = 0;
+        os_unfair_lock_unlock(&_natRateLock);
+        if (dropped > 0) [self emitEvent:@"warn" text:[NSString stringWithFormat:@"⏱ native 事件上一秒限频丢弃 %d 条(订阅太慢/事件太密)", dropped]];
+        os_unfair_lock_lock(&_natRateLock);
+    }
+    BOOL ok = (_natWindowCount < kNativeMaxPerSec);
+    if (ok) _natWindowCount++; else _natWindowDropped++;
+    os_unfair_lock_unlock(&_natRateLock);
+    return ok;
+}
+
+// log_store 旁路进来的事件(DHLogStore 队列线程): 限频 → 转 JSON → 异步投到 jsQueue 分发给订阅者。
+- (void)onNativeEntry:(DHLogEntry *)e {
+    if (![self _natRateOK]) return;
+    NSDictionary *json = DHEntryToJSON(e, YES);
+    dispatch_async(_jsQueue, ^{
+        for (JSValue *cb in [self->_nativeCallbacks copy]) {
+            @try { [cb callWithArguments:@[json]]; }
+            @catch (NSException *ex) { [self emitEvent:@"error" text:[NSString stringWithFormat:@"Native.onEvent 回调异常: %@", ex.reason ?: @"?"]]; }
+        }
+    });
 }
 
 @end

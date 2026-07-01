@@ -122,6 +122,7 @@ static const unsigned long long kDefaultMaxLogFileBytes = 50ULL * 1024 * 1024;  
         if (b.count > self->_maxPerCategory)
             [b removeObjectsInRange:NSMakeRange(0, b.count - self->_maxPerCategory)];
         self->_categoryCounts[ci]++;
+        if (self.eventObserver) self.eventObserver(entry);   // 旁路: 推给 JS 订阅者(日志队列内, 已赋 seq)
         [self _persist:entry];
     });
 }
@@ -452,4 +453,69 @@ NSString *DHTimestampNow(void) {
         fmt.dateFormat = @"yyyy-MM-dd HH:mm:ss.SSS";
     });
     return [fmt stringFromDate:[NSDate date]];
+}
+
+NSString *DHCategoryName(NSInteger c) {
+    switch (c) {
+        case DHCategoryDigest:     return @"digest";
+        case DHCategoryHMAC:       return @"hmac";
+        case DHCategorySymmetric:  return @"sym";
+        case DHCategoryAsymmetric: return @"asym";
+        case DHCategoryFile:       return @"file";
+        case DHCategorySystem:     return @"sys";
+        default:                   return @"other";
+    }
+}
+
+NSDictionary *DHEntryToJSON(DHLogEntry *e, BOOL full) {
+    NSString *preview = @"";
+    if (e.input.length) {
+        // 前 256 字节整体 UTF-8 解码后按字符截断(避免多字节中点切断回退成乱码), 失败则给前 32 字节 hex
+        NSUInteger cap = MIN(e.input.length, (NSUInteger)256);
+        NSString *u = nil;
+        for (NSUInteger n = cap; n >= (cap > 3 ? cap - 3 : 1); n--) {
+            u = [[NSString alloc] initWithData:[e.input subdataWithRange:NSMakeRange(0, n)] encoding:NSUTF8StringEncoding];
+            if (u) break;
+        }
+        if (u.length) {
+            BOOL more = e.input.length > cap || u.length > 200;
+            if (u.length > 200) u = [u substringToIndex:200];
+            preview = more ? [u stringByAppendingString:@"…"] : u;
+        } else {
+            NSData *d = e.input.length > 32 ? [e.input subdataWithRange:NSMakeRange(0, 32)] : e.input;
+            preview = DHHexFromData(d);
+        }
+    }
+    NSMutableDictionary *m = [@{
+        @"seq":          @(e.seq),
+        @"category":     @(e.category),
+        @"categoryName": DHCategoryName(e.category),
+        @"algorithm":    e.algorithm ?: @"",
+        @"operation":    e.operation ?: @"",
+        @"timestamp":    e.timestamp ?: @"",
+        @"inLen":        @(e.input.length),
+        @"outLen":       @(e.output.length),
+        @"detail":       e.detail ?: @"",
+        @"preview":      preview,
+    } mutableCopy];
+    if (!full) return m;
+    if (e.key)    { m[@"key"]    = @(e.key.length);    m[@"keyHex"]    = DHHexFromData(e.key); }
+    if (e.iv)     { m[@"iv"]     = @(e.iv.length);     m[@"ivHex"]     = DHHexFromData(e.iv); }
+    if (e.input)  {
+        m[@"input"]    = @(e.input.length);
+        m[@"inputHex"] = DHHexFromData(e.input);
+        NSString *u = DHUTF8FromData(e.input);
+        if (![u isEqualToString:@"(非UTF-8)"]) m[@"inputUtf8"] = u;
+        m[@"inputDump"] = DHHexDumpFromData(e.input);
+    }
+    if (e.output) {
+        m[@"output"]    = @(e.output.length);
+        m[@"outputHex"] = DHHexFromData(e.output);
+        NSString *u = DHUTF8FromData(e.output);
+        if (![u isEqualToString:@"(非UTF-8)"]) m[@"outputUtf8"] = u;
+        m[@"outputDump"] = DHHexDumpFromData(e.output);
+    }
+    if (e.publicKeyInfo) m[@"publicKeyInfo"] = e.publicKeyInfo;
+    if (e.callStack)     m[@"callStack"] = e.callStack;
+    return m;
 }

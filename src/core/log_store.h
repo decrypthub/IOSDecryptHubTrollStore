@@ -43,6 +43,10 @@ typedef NS_ENUM(NSInteger, DHCategory) {
 // 写入一条日志 (线程安全)
 - (void)append:(DHLogEntry *)entry;
 
+// native 事件旁路观察者 (供 JS Native.onEvent 订阅): 每条 append 成功入库(赋 seq 后)在日志串行队列
+// 内回调一次。为 nil 时零开销。设置方(DHJSEngine)负责把线程切到自己的队列。
+@property (nonatomic, copy, nullable) void (^eventObserver)(DHLogEntry *entry);
+
 // 当前所有日志快照 (按 seq 升序; 限制最近 N 条以防 UI 卡顿)
 - (NSArray<DHLogEntry *> *)snapshot;
 - (NSArray<DHLogEntry *> *)snapshotMatching:(nullable NSString *)keyword
@@ -99,6 +103,13 @@ NSString *DHHexDumpFromData(NSData * _Nullable d);
 NSString *DHUTF8FromData(NSData * _Nullable d);
 NSString *DHCallStackFiltered(void);   // 已过滤系统 / 自身的调用栈
 NSString *DHTimestampNow(void);
+
+// 分类机器名 ("digest"/"hmac"/"sym"/"asym"/"file"/"sys"/"other")
+NSString *DHCategoryName(NSInteger cat);
+// DHLogEntry → 结构化 JSON 事件。full=NO 为列表版(seq/category/algorithm/preview/…);
+// YES 追加 key/iv/input/output 的 hex/utf8/dump + publicKeyInfo + callStack。
+// 供 /api/logs、/api/logs/{seq} 与 JS Native.onEvent 共用同一份转换。
+NSDictionary *DHEntryToJSON(DHLogEntry *e, BOOL full);
 
 NS_ASSUME_NONNULL_END
 #endif
