@@ -18,7 +18,9 @@
 static void *kJSQueueKey = &kJSQueueKey;
 
 @interface DHJSEngine (Internal)
-- (void)invokeHookFn:(JSValue *)fn argsBuilder:(NSArray *(^)(void))builder;
+- (void)invokeHookFn:(JSValue *)fn
+         argsBuilder:(NSArray *(^)(void))builder
+          resultSink:(void (^)(JSValue *result))sink;
 - (void)_jsRegisterObjCHook:(JSValue *)cfg;
 @end
 
@@ -104,6 +106,64 @@ static NSDictionary *DHInvInfo(NSInvocation *inv, NSString *cn, NSString *sn) {
     return @{@"class": cn ?: @"?", @"selector": sn ?: @"?", @"self": DHDescribeObject(inv.target)};
 }
 
+#pragma mark - JS 值 → NSInvocation 参数/返回值 写回 (Step 2: 改参 + 改返回)
+
+// 把一个 JS 值按类型编码写回(argIdx>=0 写参数, <0 写返回值)。返回是否支持写回。
+// 第一版支持: id(@, 用 JSValue.toObject → NSString/NSNumber/NSArray/NSDictionary/NSDate) + 全部数值/bool;
+// SEL/Class/C字符串/裸指针/结构体 不支持写回(只读)。
+static BOOL DHWriteValue(NSInvocation *inv, JSValue *val, const char *type, NSInteger argIdx) {
+    if (!type) return NO;
+    while (*type=='r'||*type=='n'||*type=='N'||*type=='o'||*type=='O'||*type=='R'||*type=='V') type++;
+    if (type[0] == '@') {
+        id o = [val toObject];
+        if (argIdx >= 0) [inv setArgument:&o atIndex:argIdx]; else [inv setReturnValue:&o];
+        return YES;
+    }
+    NSNumber *num = [val toNumber];
+    if (!num) return NO;
+#define DH_SET(T, EXPR) do { T _v = (T)(EXPR); \
+    if (argIdx >= 0) [inv setArgument:&_v atIndex:argIdx]; else [inv setReturnValue:&_v]; } while (0)
+    switch (type[0]) {
+        case 'c': case 'B': DH_SET(char, num.charValue); return YES;
+        case 'C': DH_SET(unsigned char, num.unsignedCharValue); return YES;
+        case 's': DH_SET(short, num.shortValue); return YES;
+        case 'S': DH_SET(unsigned short, num.unsignedShortValue); return YES;
+        case 'i': DH_SET(int, num.intValue); return YES;
+        case 'I': DH_SET(unsigned int, num.unsignedIntValue); return YES;
+        case 'l': DH_SET(long, num.longValue); return YES;
+        case 'L': DH_SET(unsigned long, num.unsignedLongValue); return YES;
+        case 'q': DH_SET(long long, num.longLongValue); return YES;
+        case 'Q': DH_SET(unsigned long long, num.unsignedLongLongValue); return YES;
+        case 'f': DH_SET(float, num.floatValue); return YES;
+        case 'd': DH_SET(double, num.doubleValue); return YES;
+        default: return NO;
+    }
+#undef DH_SET
+}
+
+// onEnter 返回数组 → 逐位写回业务参数(undefined/null 元素跳过, 不改该位)。
+static void DHApplyArgOverrides(NSInvocation *inv, JSValue *result) {
+    if (!result || !result.isArray) return;
+    NSUInteger n = inv.methodSignature.numberOfArguments;
+    NSUInteger len = [[result[@"length"] toNumber] unsignedIntegerValue];
+    BOOL retained = NO;
+    for (NSUInteger i = 0; i + 2 < n && i < len; i++) {
+        JSValue *v = result[i];
+        if (v.isUndefined || v.isNull) continue;
+        if (!retained) { [inv retainArguments]; retained = YES; }   // 保参数(尤其 id)存活到 invoke
+        DHWriteValue(inv, v, [inv.methodSignature getArgumentTypeAtIndex:i + 2], (NSInteger)(i + 2));
+    }
+}
+
+// onLeave 返回非 undefined/null → 用作新返回值。
+static void DHApplyReturnOverride(NSInvocation *inv, JSValue *result) {
+    if (!result || result.isUndefined || result.isNull) return;
+    const char *t = inv.methodSignature.methodReturnType;
+    if (!t || t[0] == 'v') return;
+    [inv retainArguments];
+    DHWriteValue(inv, result, t, -1);
+}
+
 #pragma mark - DHScriptHook: 把引擎回调桥接到 JS onEnter/onLeave
 
 @interface DHScriptHook : NSObject <DHInvocationHandler>
@@ -126,12 +186,16 @@ static NSDictionary *DHInvInfo(NSInvocation *inv, NSString *cn, NSString *sn) {
 - (void)dhOnEnter:(NSInvocation *)inv {
     DHJSEngine *e = _engine; if (!e || !_onEnter) return;
     NSString *cn = _className, *sn = _selName;
-    [e invokeHookFn:_onEnter argsBuilder:^NSArray *{ return @[DHDecodeArgs(inv), DHInvInfo(inv, cn, sn)]; }];
+    [e invokeHookFn:_onEnter
+        argsBuilder:^NSArray *{ return @[DHDecodeArgs(inv), DHInvInfo(inv, cn, sn)]; }
+         resultSink:^(JSValue *result){ DHApplyArgOverrides(inv, result); }];
 }
 - (void)dhOnLeave:(NSInvocation *)inv {
     DHJSEngine *e = _engine; if (!e || !_onLeave) return;
     NSString *cn = _className, *sn = _selName;
-    [e invokeHookFn:_onLeave argsBuilder:^NSArray *{ return @[DHDecodeRet(inv), DHInvInfo(inv, cn, sn)]; }];
+    [e invokeHookFn:_onLeave
+        argsBuilder:^NSArray *{ return @[DHDecodeRet(inv), DHInvInfo(inv, cn, sn)]; }
+         resultSink:^(JSValue *result){ DHApplyReturnOverride(inv, result); }];
 }
 @end
 
@@ -264,7 +328,7 @@ static const NSUInteger kMaxEvents = 5000;   // 事件环形缓冲上限, 超出
 
 // 在 jsQueue + dh_in_script 保护下调用一个 JS hook 回调。argsBuilder 也在保护内执行
 // (解码 NSInvocation 可能触发被 hook 的方法, 需同一保护防重入)。
-- (void)invokeHookFn:(JSValue *)fn argsBuilder:(NSArray *(^)(void))builder {
+- (void)invokeHookFn:(JSValue *)fn argsBuilder:(NSArray *(^)(void))builder resultSink:(void (^)(JSValue *))sink {
     if (!fn || fn.isUndefined || fn.isNull) return;
     if (dh_in_script) return;   // 当前线程已在脚本上下文 → 放行原方法, 防重入
     dispatch_block_t work = ^{
@@ -272,7 +336,8 @@ static const NSUInteger kMaxEvents = 5000;   // 事件环形缓冲上限, 超出
         dh_in_script = 1;
         @try {
             NSArray *a = builder ? builder() : @[];
-            [fn callWithArguments:a ?: @[]];
+            JSValue *res = [fn callWithArguments:a ?: @[]];
+            if (sink) sink(res);   // 写回也在 dh_in_script + jsQueue 内(读 JSValue / 改 NSInvocation)
         } @catch (NSException *ex) {
             [self emitEvent:@"error" text:[NSString stringWithFormat:@"hook 回调异常: %@", ex.reason ?: @"?"]];
         }
