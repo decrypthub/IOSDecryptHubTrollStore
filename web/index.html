@@ -170,23 +170,24 @@
 <div class='healthbar' id='healthbar'></div>
 <div class='offlinebar' id='offlinebar'></div>
 <nav class='tabbar' id='tabbar'>
-  <button class='tab active' data-tab='crypto'>加解密<span class='n' id='n-crypto'></span></button>
-  <button class='tab' data-tab='file'>文件<span class='n' id='n-file'></span></button>
-  <button class='tab' data-tab='sys'>系统<span class='n' id='n-sys'></span></button>
-  <button class='tab' data-tab='symbols'>符号</button>
+  <button class='tab active' data-tab='events'>事件流<span class='n' id='n-events'></span></button>
   <button class='tab' data-tab='dump'>砸壳</button>
   <button class='tab' data-tab='script'>脚本</button>
 </nav>
 <div class='filters' id='toolbar'>
-  <span id='catWrap'><label>分类</label>
+  <span id='catWrap'><label>类型</label>
   <select id='catSel'>
-    <option value='-2'>全部</option>
+    <option value='-1'>全部</option>
+    <option value='-2'>加密组</option>
     <option value='0'>摘要</option>
     <option value='1'>HMAC</option>
     <option value='2'>对称</option>
     <option value='3'>非对称</option>
+    <option value='4'>文件</option>
+    <option value='5'>系统</option>
+    <option value='6'>其它</option>
   </select></span>
-  <input id='q' type='search' placeholder='搜索本类: 算法/路径/明文/Hex…'>
+  <input id='q' type='search' placeholder='搜索: 算法/路径/明文/Hex…'>
   <span id='minWrap'><label>最小</label>
   <select id='minSize'>
     <option value='0'>不限</option>
@@ -195,8 +196,8 @@
     <option value='10240'>≥10 KB</option>
   </select></span>
   <button id='tabPauseBtn' class='warn'>暂停</button>
-  <button id='tabDownloadBtn'>下载本类</button>
-  <button id='tabClearBtn' class='danger'>清空本类</button>
+  <button id='tabDownloadBtn'>下载</button>
+  <button id='tabClearBtn' class='danger'>清空</button>
   <span class='cap-group'><span class='lab'>捕获</span><span id='captureWrap'></span></span>
   <span id='count' style='color:#6e7681; font-size:11px; margin-left:auto;'></span>
 </div>
@@ -221,24 +222,6 @@
     <div id='dumpDone' class='dump-done' style='display:none;'></div>
     <table class='dump-table'><thead><tr><th>镜像</th><th>类型</th><th>大小</th></tr></thead>
       <tbody id='dumpImgBody'><tr><td colspan='3' style='color:#6e7681;'>点击「刷新镜像」加载…</td></tr></tbody></table>
-  </div>
-</div>
-<div id='symPane' class='dumppane' style='display:none;'>
-  <div class='dumpwrap'>
-    <h2>符号导入表 (可 hook 观测)</h2>
-    <div class='note'>fishhook 只能改<b>导入符号表</b> —— 即本 image 调用其它 dylib 导出的符号。凡在下表出现的, 都是 fishhook 候选; 被<b>静态链接</b>进主二进制的符号不在导入表里, fishhook 无法拦截, 需改用 inline hook。</div>
-    <h3 class='sym-h3'>按 image 浏览导入符号</h3>
-    <div class='sym-controls'>
-      <label>image</label>
-      <select id='symImgSel'></select>
-      <input id='symQ' type='search' placeholder='过滤符号 (子串, 如 SSL / CC / open)…'>
-      <button id='symRefresh'>刷新</button>
-      <span id='symCount' style='color:#6e7681; font-size:11px;'></span>
-    </div>
-    <table class='dump-table'>
-      <thead><tr><th style='width:48px;'>#</th><th>导入符号 (均为 fishhook 候选)</th></tr></thead>
-      <tbody id='symListBody'><tr><td colspan='2' style='color:#6e7681;'>加载中…</td></tr></tbody>
-    </table>
   </div>
 </div>
 <div id='scriptPane' class='dumppane' style='display:none;'>
@@ -314,18 +297,13 @@ ObjC.hook({
 <script>
   const CAT_NAMES = ['摘要','HMAC','对称','非对称','文件','系统','其它'];
   const CAT_CLS   = ['digest','hmac','sym','asym','file','sys','other'];
-  const TAB_CAT   = { crypto:-2, file:4, sys:5 };
-  const LOG_TABS  = ['crypto','file','sys'];   // 走日志 master-detail 的 tab; 符号/砸壳是独立面板
-  const TAB_SUBS = {
-    crypto: [['DIGEST','摘要'],['HMAC','HMAC'],['SYMMETRIC','对称'],['ASYMMETRIC','非对称'],['KDF','KDF']],
-    file:   [['FILE_OPEN','open'],['FILE_WRITE','write'],['FILE_UNLINK','unlink'],['FILE_RENAME','rename']],
-    sys:    [['SYS_DLOPEN','dlopen']],
-  };
-  const tabState = { crypto:{q:''}, file:{q:''}, sys:{q:''} };
-  function tabCat(){ return activeTab==='crypto' ? -2 : TAB_CAT[activeTab]; }
+  const LOG_TABS  = ['events'];   // 走 master-detail 的 tab; 砸壳/脚本是独立面板
+  // 全部 capture 子开关(统一列出, 不再按 tab 分)
+  const ALL_SUBS = [['DIGEST','摘要'],['HMAC','HMAC'],['SYMMETRIC','对称'],['ASYMMETRIC','非对称'],['KDF','KDF'],
+    ['FILE_OPEN','open'],['FILE_WRITE','write'],['FILE_UNLINK','unlink'],['FILE_RENAME','rename'],['SYS_DLOPEN','dlopen']];
   const EMPTY = '<div class="detail-empty">← 选择左侧一条记录查看详情</div>';
   const LOADING = '<div class="loading"><span class="spinner"></span>加载中…</div>';
-  let selectedSeq = null, detailCache = {}, stats = {}, activeTab = 'crypto';
+  let selectedSeq = null, detailCache = {}, stats = {}, activeTab = 'events';
   let listLive = false;   // 本会话当前 tab 是否已渲染过实时数据(用于断连时决定是否回退缓存)
 
   // 服务不可达(App 闪退/被检测拦截/网络断): 绝不清屏, 只挂横幅。数据已落盘, 引导用「下载全部日志」取全量。
@@ -345,16 +323,15 @@ ObjC.hook({
   function escapeHTML(s) { return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
   async function copyText(t) { try { await navigator.clipboard.writeText(t); toast('已复制 '+t.length+' 字符'); } catch(e) { const ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast('已复制'); } }
   async function fetchJSON(url, opts) { const r=await fetch(url,opts); if(!r.ok) throw new Error(r.status+' '+r.statusText); return r.json(); }
-  function curCat() { return activeTab==='crypto' ? $('catSel').value : TAB_CAT[activeTab]; }
-  function buildCapture(tab) {
-    const subs = TAB_SUBS[tab] || [];
-    $('captureWrap').innerHTML = subs.map(([sub,lab]) =>
+  function curCat() { return $('catSel').value; }
+  function buildCapture() {
+    $('captureWrap').innerHTML = ALL_SUBS.map(([sub,lab]) =>
       '<label class="cap-chip"><input type="checkbox" data-sub="'+sub+'" checked> '+escapeHTML(lab)+'</label>').join('');
   }
   function updateToolbar() {
-    if (!LOG_TABS.includes(activeTab)) return;
-    const cap=(stats&&stats.capture)||{}, pbc=(stats&&stats.pausedByCat)||[];
-    const paused = activeTab==='crypto' ? !!pbc[0] : !!pbc[TAB_CAT[activeTab]];
+    if (activeTab !== 'events') return;
+    const cap=(stats&&stats.capture)||{};
+    const paused = !!(stats&&stats.paused);
     const pb=$('tabPauseBtn'); if(pb){ pb.textContent = paused?'继续':'暂停'; pb.classList.toggle('danger', paused); }
     document.querySelectorAll('#captureWrap input[data-sub]').forEach(cb => { if(cap[cb.dataset.sub]!==undefined) cb.checked = cap[cb.dataset.sub]!==0; });
   }
@@ -391,10 +368,7 @@ ObjC.hook({
       const bc = stats.byCategory || [];
       const sp = stats.paused ? '已暂停' : '运行中';
       $('stats').innerHTML = '<span>'+sp+'</span><span>总: <b>'+stats.total+'</b></span>';
-      const cryptoN = (bc[0]||0)+(bc[1]||0)+(bc[2]||0)+(bc[3]||0);
-      $('n-crypto').textContent = cryptoN ? cryptoN : '';
-      $('n-file').textContent = bc[4] ? bc[4] : '';
-      $('n-sys').textContent = bc[5] ? bc[5] : '';
+      const ne=$('n-events'); if(ne) ne.textContent = stats.total ? stats.total : '';
       $('ver').textContent = stats.version ? ('v'+stats.version) : '';
       const p = stats.process || {}; const pb = [];
       if (p.appName) pb.push('<span><b>'+escapeHTML(p.appName)+'</b></span>');
@@ -537,23 +511,19 @@ ObjC.hook({
   function switchTab(name) {
     activeTab = name;
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab===name));
-    const isLog = LOG_TABS.includes(name);
+    const isEvents = (name === 'events');
     $('dumpPane').style.display = (name==='dump') ? 'flex' : 'none';
-    $('symPane').style.display  = (name==='symbols') ? 'flex' : 'none';
     $('scriptPane').style.display = (name==='script') ? 'flex' : 'none';
     if (name!=='script' && scriptPolling) { clearInterval(scriptPolling); scriptPolling=null; }
-    document.querySelector('.workspace').style.display = isLog ? 'flex' : 'none';
-    $('toolbar').style.display = isLog ? 'flex' : 'none';
+    document.querySelector('.workspace').style.display = isEvents ? 'flex' : 'none';
+    $('toolbar').style.display = isEvents ? 'flex' : 'none';
     if (name==='dump') { loadDumpImages(); pollDump(); return; }
-    if (name==='symbols') { loadSymbols(); return; }
     if (name==='script') { loadScript(); return; }
-    $('catWrap').style.display = (name==='crypto') ? '' : 'none';
-    $('minWrap').style.display = (name==='crypto') ? '' : 'none';
-    $('q').value = (tabState[name]||{}).q || '';
-    buildCapture(name); updateToolbar();
+    // events: 统一事件流
+    updateToolbar();
     selectedSeq = null; $('detail').innerHTML = EMPTY;
-    listLive = false;   // 切到新 tab: 还没拿到该类实时数据, 断连时回退该类缓存
-    $('list').innerHTML = LOADING;   // 立即清掉上一个 tab 的行, 避免短暂显示错类数据
+    listLive = false;
+    $('list').innerHTML = LOADING;
     refreshList({loading:true});
   }
   let dumpPolling = null;
@@ -602,34 +572,6 @@ ObjC.hook({
       toast('砸壳失败: '+(s.error||'未知错误'));
     }
   }
-  // ---- 符号导入表 ----
-  async function loadSymbols(){ await loadSymImages(); }
-  let symImages = [];
-  async function loadSymImages(){
-    try {
-      const d = await fetchJSON('/api/symbols/images');
-      symImages = d.images||[];
-      const prev = $('symImgSel').value;
-      $('symImgSel').innerHTML = symImages.map(im =>
-        '<option value="'+im.idx+'">'+escapeHTML(im.name)+(im.main?' [主程序]':'')+' · '+im.imports+'</option>').join('');
-      if (prev && symImages.some(im=>String(im.idx)===prev)) { $('symImgSel').value = prev; }
-      else { const m = symImages.find(x=>x.main); if (m) $('symImgSel').value = m.idx; }
-      loadSymList();
-    } catch(e){ $('symListBody').innerHTML = '<tr><td colspan="2">'+escapeHTML(e.message)+'</td></tr>'; }
-  }
-  async function loadSymList(){
-    const idx = $('symImgSel').value, q = $('symQ').value.trim();
-    if (idx==='' || idx===undefined) return;
-    $('symListBody').innerHTML = '<tr><td colspan="2" style="color:#8b949e;"><span class="spinner" style="margin-right:8px;"></span>加载中…</td></tr>';
-    try {
-      const d = await fetchJSON('/api/symbols?img='+encodeURIComponent(idx)+'&q='+encodeURIComponent(q)+'&limit=500');
-      const rows = (d.symbols||[]).map((nm,i) =>
-        '<tr><td style="color:#6e7681;">'+(i+1)+'</td><td class="symname">'+escapeHTML(nm)+'</td></tr>');
-      $('symListBody').innerHTML = rows.join('') || '<tr><td colspan="2" style="color:#6e7681;">无匹配符号</td></tr>';
-      $('symCount').textContent = d.shown+' / '+d.total+' 个导入符号'+(d.total>d.shown?' (已截断, 用过滤缩小)':'');
-    } catch(e){ $('symListBody').innerHTML = '<tr><td colspan="2">'+escapeHTML(e.message)+'</td></tr>'; }
-  }
-
   // ---- JS 脚本 Hook 调试器 ----
   let scriptEvtSeq = 0, scriptPolling = null, scriptLoaded = false;
   function scriptAppendEvents(events){
@@ -716,10 +658,10 @@ ObjC.hook({
   });
   $('catSel').addEventListener('change', () => refreshList({loading:true}));
   $('minSize').addEventListener('change', () => refreshList({loading:true}));
-  let qTimer; $('q').addEventListener('input', () => { (tabState[activeTab]||{}).q = $('q').value; clearTimeout(qTimer); qTimer=setTimeout(()=>refreshList({loading:true}),200); });
-  $('tabPauseBtn').addEventListener('click', async () => { const c=tabCat(); const paused = activeTab==='crypto' ? ((stats.pausedByCat||[])[0]) : ((stats.pausedByCat||[])[c]); await fetch('/api/pause?cat='+c+'&paused='+(paused?'0':'1'),{method:'POST'}); await refreshStats(); refreshList(); });
-  $('tabDownloadBtn').addEventListener('click', () => { window.open('/api/logs/download?cat='+tabCat(), '_blank'); });
-  $('tabClearBtn').addEventListener('click', async () => { if(!confirm('确定清空本板块日志?')) return; await fetch('/api/clear?cat='+tabCat(),{method:'POST'}); detailCache={}; selectedSeq=null; $('detail').innerHTML=EMPTY; listLive=false; refreshStats(); refreshList({loading:true}); });
+  let qTimer; $('q').addEventListener('input', () => { clearTimeout(qTimer); qTimer=setTimeout(()=>refreshList({loading:true}),200); });
+  $('tabPauseBtn').addEventListener('click', async () => { const paused=!!(stats&&stats.paused); await fetch('/api/pause?paused='+(paused?'0':'1'),{method:'POST'}); await refreshStats(); refreshList(); });
+  $('tabDownloadBtn').addEventListener('click', () => { window.open('/api/logs/download?cat='+curCat(), '_blank'); });
+  $('tabClearBtn').addEventListener('click', async () => { const c=curCat(); if(!confirm(c<0?'确定清空全部日志?':'确定清空当前类型日志?')) return; await fetch('/api/clear'+(c<0?'':'?cat='+c),{method:'POST'}); detailCache={}; selectedSeq=null; $('detail').innerHTML=EMPTY; listLive=false; refreshStats(); refreshList({loading:true}); });
   $('captureWrap').addEventListener('change', async (ev) => { const cb=ev.target; if(!cb.dataset||!cb.dataset.sub) return; await fetch('/api/capture?sub='+encodeURIComponent(cb.dataset.sub)+'&on='+(cb.checked?'1':'0'),{method:'POST'}); refreshStats(); });
   $('diagBtn').addEventListener('click', openDiag);
   $('diagClose').addEventListener('click', () => $('diagMask').classList.remove('show'));
@@ -744,9 +686,6 @@ ObjC.hook({
   $('dumpRefresh').addEventListener('click', loadDumpImages);
   $('dumpBin').addEventListener('click', () => startDump('bin'));
   $('dumpIpa').addEventListener('click', () => startDump('ipa'));
-  $('symRefresh').addEventListener('click', loadSymbols);
-  $('symImgSel').addEventListener('change', loadSymList);
-  let symQTimer; $('symQ').addEventListener('input', () => { clearTimeout(symQTimer); symQTimer=setTimeout(loadSymList,200); });
   $('scriptRun').addEventListener('click', runScript);
   $('scriptStop').addEventListener('click', stopScript);
   $('scriptClear').addEventListener('click', () => { $('scriptLog').textContent=''; });
@@ -756,8 +695,8 @@ ObjC.hook({
     document.addEventListener('mousemove', e => { if(!dragging) return; const rect=wsEl.getBoundingClientRect(); lp.style.width=Math.max(220, Math.min(rect.width-260, e.clientX-rect.left))+'px'; });
     document.addEventListener('mouseup', () => { if(dragging){ dragging=false; sp.classList.remove('dragging'); document.body.style.userSelect=''; } });
   })();
-  setInterval(() => { if(!$('autoRefresh').checked) return; refreshStats(); if(LOG_TABS.includes(activeTab)) refreshList(); }, 1500);
-  buildCapture('crypto'); refreshStats(); refreshList({loading:true});
+  setInterval(() => { if(!$('autoRefresh').checked) return; refreshStats(); if(activeTab==='events') refreshList(); }, 1500);
+  buildCapture(); refreshStats(); refreshList({loading:true});
 </script>
 </body>
 </html>
