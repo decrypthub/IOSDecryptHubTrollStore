@@ -232,6 +232,8 @@
       <br>• <b>ObjC.trace</b>({classRegex, selectorRegex, limit}) — 正则批量 hook(仅非系统类)
       <br>• <b>Notification.trace</b>({nameRegex, onPost}) / <b>TargetAction.trace</b>({onSend}) — 事件链观测(仅 iOS)
       <br>• <b>Sym.hookKnown</b>('send'|'recv'|'SecItemCopyMatching', {onEnter}) — C 符号只读观测
+      <br>• <b>Native.onEvent</b>(fn) / <b>Native.subscribe</b>({type, api, pathRegex, onEvent}) — 订阅 native 抓取的 crypto/file/system 结构化事件
+      <br>• <b>Trace.crypto/file/system</b>({onEvent, pathRegex, apis}) — 一键开抓取+订阅; <b>Sym.list</b>(imgSub, symSub) / <b>Sym.images</b>() — 查导入符号
       <br>• <b>log</b>(...) — 输出到下方事件区
       <br><span class='warn-note'>⚠ 仅在自有/授权 App 内使用; 脚本在目标进程内<b>同步</b>执行, 死循环可能卡住 App —— 只跑你信任的脚本。</span></div>
     <div class='dump-actions'>
@@ -239,12 +241,10 @@
       <button id='scriptStop'>停止 / 复位</button>
       <button id='scriptClear'>清空输出</button>
     </div>
-    <textarea id='scriptEdit' spellcheck='false' style='width:100%; height:200px; background:#0d1117; color:#c9d1d9; border:1px solid #30363d; border-radius:6px; padding:10px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size:12px; line-height:1.5; resize:vertical;'>// 示例: hook 类方法读取返回值
-ObjC.hook({
-  class: 'NSDate',
-  selector: '+ date',
-  onLeave: function(ret, info){ log('NSDate.date =>', ret); }
-});</textarea>
+    <textarea id='scriptEdit' spellcheck='false' style='width:100%; height:200px; background:#0d1117; color:#c9d1d9; border:1px solid #30363d; border-radius:6px; padding:10px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size:12px; line-height:1.5; resize:vertical;'>// 示例: 订阅 native 加密事件, 打印算法与明文
+Trace.crypto({ onEvent: function(e){
+  log(e.categoryName, e.algorithm, 'in=' + (e.inputUtf8 || e.inputHex || '').slice(0, 40));
+}});</textarea>
     <h3 class='sym-h3' style='margin-top:14px;'>事件输出 <span id='scriptEvtCount' style='color:#6e7681; font-weight:400;'></span></h3>
     <pre id='scriptLog' style='background:#0d1117; border:1px solid #21262d; border-radius:6px; padding:10px 12px; margin:0; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size:11px; line-height:1.55; max-height:340px; min-height:90px; overflow:auto; white-space:pre-wrap; word-break:break-all; color:#c9d1d9;'></pre>
   </div>

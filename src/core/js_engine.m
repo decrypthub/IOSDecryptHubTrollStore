@@ -11,6 +11,8 @@
 #import "dh_health.h"          // dh_in_script
 #import "hook_objc_engine.h"
 #import "hook_symbol_api.h"
+#import "dh_capture.h"
+#import "dh_symtab.h"
 #import <JavaScriptCore/JavaScriptCore.h>
 #import <objc/runtime.h>
 #import <os/lock.h>
@@ -146,6 +148,48 @@ static NSArray *DHEnumerateMatches(NSString *classPat, NSString *selPat, NSInteg
     return out;
 }
 
+#pragma mark - 符号导入表查询 (供 Sym.list / Sym.images, 取代前端符号 tab)
+
+typedef struct { void *outArr; void *imgName; } DHSymCtx;
+static void dh_symlist_cb(const char *name, void *ctxp) {
+    DHSymCtx *c = ctxp;
+    [(__bridge NSMutableArray *)c->outArr addObject:@{
+        @"image":  (__bridge NSString *)c->imgName ?: @"?",
+        @"symbol": [NSString stringWithUTF8String:name] ?: @"?"}];
+}
+
+// 遍历有导入符号的 image(image 名子串过滤), 收集匹配 symSub 子串的导入符号, 返回 [{image, symbol}] (限 limit)。
+static NSArray *DHSymList(NSString *imgSub, NSString *symSub, NSInteger limit) {
+    if (limit <= 0 || limit > 2000) limit = 500;
+    const char *sq = symSub.length ? symSub.UTF8String : NULL;
+    NSMutableArray *out = [NSMutableArray array];
+    int n = dh_symtab_image_count();
+    for (int i = 0; i < n && (NSInteger)out.count < limit; i++) {
+        char nm[256]; int isMain = 0;
+        dh_symtab_image_name(i, nm, sizeof(nm), &isMain);
+        NSString *imgName = [NSString stringWithUTF8String:nm] ?: @"?";
+        if (imgSub.length && [imgName rangeOfString:imgSub].location == NSNotFound) continue;
+        DHSymCtx ctx = { (__bridge void *)out, (__bridge void *)imgName };
+        dh_symtab_imports(i, sq, (int)(limit - (NSInteger)out.count), dh_symlist_cb, &ctx);
+    }
+    return out;
+}
+
+// 有导入符号的 image 列表(主程序优先由前端排序), 返回 [{idx, name, main, imports}]。
+static NSArray *DHSymImages(void) {
+    NSMutableArray *arr = [NSMutableArray array];
+    int n = dh_symtab_image_count();
+    for (int i = 0; i < n; i++) {
+        char nm[256]; int isMain = 0;
+        dh_symtab_image_name(i, nm, sizeof(nm), &isMain);
+        int imports = dh_symtab_imports(i, NULL, 0, NULL, NULL);
+        if (imports <= 0) continue;
+        [arr addObject:@{@"idx": @(i), @"name": [NSString stringWithUTF8String:nm] ?: @"?",
+                         @"main": isMain ? @YES : @NO, @"imports": @(imports)}];
+    }
+    return arr;
+}
+
 // 纯 JS 上层 adapter, 每次(重)建 context 后注入。建在 native 原语 ObjC.hook / ObjC.enumerate 之上。
 static NSString *const kDHPrelude =
     @"(function(){\n"
@@ -183,6 +227,32 @@ static NSString *const kDHPrelude =
     "    log('TargetAction.trace 已挂 UIApplication.sendAction (仅 iOS 有效)');\n"
     "  }};\n"
     "  this.Notification = Notification; this.TargetAction = TargetAction;\n"
+    "  Native.subscribe = function(cfg){\n"
+    "    cfg = cfg || {};\n"
+    "    var types = cfg.type ? (cfg.type instanceof Array ? cfg.type : [cfg.type]) : null;\n"
+    "    var apiRe = cfg.api ? new RegExp(cfg.api instanceof Array ? cfg.api.join('|') : cfg.api) : null;\n"
+    "    var pathRe = cfg.pathRegex ? new RegExp(cfg.pathRegex) : null, on = cfg.onEvent;\n"
+    "    Native.onEvent(function(e){\n"
+    "      if (types && types.indexOf(e.categoryName) < 0) return;\n"
+    "      if (apiRe && !apiRe.test(e.algorithm||'') && !apiRe.test(e.operation||'')) return;\n"
+    "      if (pathRe && !pathRe.test(e.detail||'')) return;\n"
+    "      if (on) on(e); else log('[native] '+e.categoryName+' '+(e.algorithm||e.operation||'')+' '+(e.detail||''));\n"
+    "    });\n"
+    "  };\n"
+    "  var Trace = {\n"
+    "    crypto: function(cfg){ cfg=cfg||{}; [0,1,2,3,4].forEach(function(i){Native._setCapture(i,true);});\n"
+    "      Native.subscribe({type:['digest','hmac','sym','asym','other'], api:cfg.apis, onEvent:cfg.onEvent});\n"
+    "      log('Trace.crypto 已开启(摘要/HMAC/对称/非对称/KDF)'); },\n"
+    "    file: function(cfg){ cfg=cfg||{}; [5,6,7,8].forEach(function(i){Native._setCapture(i,true);});\n"
+    "      Native.subscribe({type:'file', pathRegex:cfg.pathRegex, onEvent:cfg.onEvent});\n"
+    "      log('Trace.file 已开启(open/write/unlink/rename)'); },\n"
+    "    system: function(cfg){ cfg=cfg||{}; Native._setCapture(9,true);\n"
+    "      Native.subscribe({type:'sys', onEvent:cfg.onEvent});\n"
+    "      log('Trace.system 已开启(dlopen)'); }\n"
+    "  };\n"
+    "  this.Trace = Trace;\n"
+    "  Sym.list = function(imgSub, symSub, limit){ return Sym._list(imgSub||'', symSub||'', limit||500); };\n"
+    "  Sym.images = function(){ return Sym._images(); };\n"
     "})();\n";
 
 #pragma mark - JS 值 → NSInvocation 参数/返回值 写回 (Step 2: 改参 + 改返回)
@@ -410,6 +480,12 @@ static const NSUInteger kMaxEvents = 5000;   // 事件环形缓冲上限, 超出
         DHJSEngine *s = ws; if (!s) return;
         [s _jsRegisterSymbolHook:name cfg:cfg];
     };
+    symNS[@"_list"] = ^id(JSValue *imgSub, JSValue *symSub, JSValue *limit) {
+        return DHSymList(imgSub.isString ? [imgSub toString] : nil,
+                         symSub.isString ? [symSub toString] : nil,
+                         limit.isNumber ? (NSInteger)[limit toInt32] : 500);
+    };
+    symNS[@"_images"] = ^id{ return DHSymImages(); };
     _ctx[@"Sym"] = symNS;
 
     // Native 命名空间: Native.onEvent(fn) 订阅 native 抓取的结构化事件流(crypto/file/system…)
@@ -417,6 +493,9 @@ static const NSUInteger kMaxEvents = 5000;   // 事件环形缓冲上限, 超出
     nativeNS[@"onEvent"] = ^(JSValue *fn) {
         DHJSEngine *s = ws; if (!s) return;
         [s _jsAddNativeCallback:fn];
+    };
+    nativeNS[@"_setCapture"] = ^(JSValue *idx, JSValue *on) {
+        if (idx.isNumber) dh_capture_set_sub((dh_cap_sub)[idx toInt32], [on toBool] ? 1 : 0);
     };
     _ctx[@"Native"] = nativeNS;
 
