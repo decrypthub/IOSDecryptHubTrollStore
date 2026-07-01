@@ -117,6 +117,31 @@ $(MAC_TARGET): $(SRC)
 	$(CC) $(MAC_CFLAGS) $(SRC) -o $(MAC_TARGET)
 	@echo "✅ macOS dylib: $(MAC_TARGET)"
 
+# ---------- 3b) iOS Simulator (真 UIKit / file / dlopen 环境, 注入模拟器 App 测试) ----------
+SIM_TARGET := decrypt_helper.sim.dylib
+SIM_SDK    := $(shell xcrun --sdk iphonesimulator --show-sdk-path 2>/dev/null)
+SIM_ARCH   := $(shell uname -m)
+SIM_MIN    := 14.0
+SIM_FRAMEWORKS := -framework Foundation -framework UIKit -framework CoreGraphics -framework Security -framework JavaScriptCore
+SIM_CFLAGS := -target $(SIM_ARCH)-apple-ios$(SIM_MIN)-simulator \
+              -isysroot $(SIM_SDK) \
+              -dynamiclib \
+              -install_name @executable_path/$(SIM_TARGET) \
+              -ObjC -fobjc-arc \
+              -Wall -Wno-deprecated-declarations -Wno-nullability-completeness \
+              -O0 -g \
+              $(INCLUDES) \
+              $(SIM_FRAMEWORKS)
+
+sim: $(WEB_HEADER) $(SIM_TARGET)
+
+$(SIM_TARGET): $(SRC)
+	@if [ -z "$(SIM_SDK)" ]; then echo "❌ 没找到 iPhoneSimulator SDK"; exit 1; fi
+	@echo "[*] iOS Simulator 编译 (arch=$(SIM_ARCH), min=$(SIM_MIN))..."
+	$(CC) $(SIM_CFLAGS) $(SRC) -o $(SIM_TARGET)
+	codesign -s - -f $(SIM_TARGET) 2>/dev/null || true
+	@echo "✅ simulator dylib: $(SIM_TARGET)"
+
 # ---------- 4) Mac 灰度测试 ----------
 # 编 dylib + 编 exercise_runner + DYLD_INSERT_LIBRARIES 跑.
 # 跑完浏览器开 http://127.0.0.1:8088 应该能看到 ~12 条日志.
@@ -147,6 +172,6 @@ dist: $(TARGET)
 	@echo "✅ 发布产物: $(DIST_DYLIB)"
 
 clean:
-	rm -f $(TARGET) $(MAC_TARGET) $(TEST_BIN) decrypt_helper-*.dylib
+	rm -f $(TARGET) $(MAC_TARGET) $(SIM_TARGET) $(TEST_BIN) decrypt_helper-*.dylib
 
 .PHONY: all linux mac test-mac dist clean
