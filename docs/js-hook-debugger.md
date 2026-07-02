@@ -77,8 +77,24 @@ native 结构化事件与脚本 log 走两套独立缓冲,互不污染。
 ### 平台约束(无法消除,不是 bug)
 - **C 函数必须 native thunk**:iOS 不允许运行时生成机器码,任意 C 函数不能纯 JS hook;
   C 符号观测靠固定 native hook + `Sym.hookKnown` 模板表。ObjC 方法则可纯 JS 动态 hook。
+- **fishhook 的覆盖边界**:它改的是 Mach-O 里 `__la_symbol_ptr`/`__got`(lazy / non-lazy
+  symbol pointer)这类**导入符号的调用点**,不是 inline 改函数本体。因此**静态链接进来的函数、
+  同镜像内部直接调用、已被缓存的函数指针**都覆盖不到。后加载镜像会被 fishhook 的
+  `_dyld_register_func_for_add_image` 回调自动重放 rebind,无需手动处理。
 - **纯 Swift 方法 hook 不到**:`ObjC.hook` 只拦走 `objc_msgSend` 的方法;非 `@objc` 的
   Swift 静态派发/witness table 方法无法拦截。
+- **只能 hook「已存在」的 ObjC 方法**:安装时 `class_getInstanceMethod` 找不到即拒绝。
+  故 NSProxy 虚拟方法 / 纯动态 selector / 靠 `methodSignatureForSelector:` 动态构造签名的方法
+  不在支持范围(也因此无需接管 `methodSignatureForSelector:` —— 被 hook 的方法签名天然可用)。
+
+### 改参 / 改返回的类型能力分层
+`onEnter` 返回数组改参数、`onLeave` 返回值改返回值,底层用 `NSInvocation` 写回,能力**分层**:
+- ✅ **可改**:ObjC 对象(`id`/`NSString`/`NSNumber`/`NSArray`/`NSDictionary`/`NSDate`)、`BOOL`
+  及全部整型/浮点标量。
+- 🔒 **只读**:`struct`/`union`、`void*`/`char*` 裸指针、block、C++ 对象、SIMD 向量——可读取展示,
+  写回不支持(静默忽略,不崩)。
+
+> 措辞校准:**不是**"任意参数和返回值都能改",而是"**多数 ObjC 对象与基础标量可改,复杂 C 类型以只读/展示为主**"。
 
 ### 风险评估
 | 风险 | 结论 |
@@ -97,6 +113,9 @@ native 结构化事件与脚本 log 走两套独立缓冲,互不污染。
 - **看门狗**:单次 JS 回调 >1s 告警(JS 死循环无法强杀,只跑可信脚本)。
 - **重入保护**:`dh_in_script` 线程局部,防 JS 回调触发被 hook 方法递归。
 - **payload 截断**:事件 hex/dump 上限 4KB。
+- **异常语义(观察而不改变)**:JS 回调(onEnter/onLeave)抛异常 → 吞掉记录,不影响宿主;原方法
+  自身抛的 `NSException` → 原样透传回 App(不吞,保持 App 原有 try/catch 语义);原实现全程只执行
+  一次,hook 出异常也绝不重复副作用(杜绝"发两次请求 / 写两次文件"类 bug)。
 
 ## 五、真机验证必测清单(TrollStore 注入后逐条对照)
 

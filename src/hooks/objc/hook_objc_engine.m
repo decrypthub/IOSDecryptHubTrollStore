@@ -94,36 +94,40 @@ static DHHookInfo *lookupHook(Class start, SEL sel, BOOL *outFused) {
 }
 
 // 统一 forwardInvocation: trampoline。
+//
+// 异常语义(关键, 三段式): 严格区分"谁抛的异常"——
+//   ① onEnter / ③ onLeave 是 JS hook 侧回调: 抛异常吞掉(下层 runProtected 已记录), 绝不影响宿主;
+//   ② 原实现 [inv invoke]: **不包 @try**, 让原方法自身的 NSException 沿栈透传回 App。
+//      hook 调试器的天职是"观察而不改变": 若吞掉原方法异常, 上层本该 catch 的就 catch 不到,
+//      等于悄悄改了 App 行为(最难查的海森堡 bug), 还让本该崩的进程带损坏状态续命。
+//   原实现全程只在 ② 处 invoke 一次(不再有 catch 里的兜底 invoke)→ 从根上杜绝原方法重复执行/重复副作用。
 static void dh_forwardInvocation(id self, SEL _cmd, NSInvocation *inv) {
     SEL sel = inv.selector;
     BOOL fused = NO;
     DHHookInfo *info = lookupHook(object_getClass(self), sel, &fused);
     if (info) {
-        if (fused) {   // 已熔断卸载: 本次仍跑原实现, 之后调用走恢复的 IMP(不再进 trampoline)
+        // alias 一定在(hookClass 安装时已校验 class_addMethod 成功); 沿链查 Method 直调,
+        // 不走 respondsToSelector: 的动态解析(可能被目标类重写, 且是多余的一层)。
+        Method aliasMethod = class_getInstanceMethod(info.cls, info.alias);
+        inv.selector = info.alias;                  // invoke 即跑原实现
+        if (fused) {   // 已熔断卸载: 本次仍跑原实现一次(原方法异常照样透传), 之后调用走恢复的 IMP(不再进 trampoline)
             if (gFuseNotify) gFuseNotify(info.className, info.selName);
-            @try { inv.selector = info.alias; if ([self respondsToSelector:info.alias]) [inv invoke]; }
-            @catch (__unused NSException *e) {}
+            if (aliasMethod) [inv invoke];
             return;
         }
-        @try {
-            id<DHInvocationHandler> h = info.handler;
-            inv.selector = info.alias;          // 之后 invoke 即跑原实现
-            [h dhOnEnter:inv];
-            if ([self respondsToSelector:info.alias]) [inv invoke];
-            [h dhOnLeave:inv];
-        } @catch (NSException *ex) {
-            // hook 出错绝不崩目标: 尽力把原实现跑掉以保语义
-            @try {
-                if (inv.selector != info.alias) inv.selector = info.alias;
-                if ([self respondsToSelector:info.alias]) [inv invoke];
-            } @catch (__unused NSException *e2) {}
-        }
+        id<DHInvocationHandler> h = info.handler;
+        @try { [h dhOnEnter:inv]; }                 // ① JS onEnter 异常: 吞, 继续跑原实现(App 不因 hook 挂了就少执行)
+        @catch (__unused NSException *e) {}
+        if (aliasMethod) [inv invoke];              // ② 原实现: 不 catch, 异常透传保宿主语义; 全程只此一次
+        @try { [h dhOnLeave:inv]; }                 // ③ JS onLeave 异常: 吞; 原方法已执行, 绝不重复
+        @catch (__unused NSException *e) {}
         return;
     }
-    // 未命中: 链回目标类原本的 forwardInvocation:(若有), 否则标准报错
+    // 未命中: 链回目标类原本的 forwardInvocation:(若有, 沿链取 IMP 直调, 继承安全且省一层动态派发), 否则标准报错
     SEL origFwd = @selector(__dh_orig_forwardInvocation:);
-    if ([object_getClass(self) instancesRespondToSelector:origFwd]) {
-        ((void (*)(id, SEL, NSInvocation *))objc_msgSend)(self, origFwd, inv);
+    Method om = class_getInstanceMethod(object_getClass(self), origFwd);
+    if (om) {
+        ((void (*)(id, SEL, NSInvocation *))method_getImplementation(om))(self, origFwd, inv);
     } else {
         [self doesNotRecognizeSelector:sel];
     }
@@ -184,7 +188,13 @@ static void dh_forwardInvocation(id self, SEL _cmd, NSInvocation *inv) {
 
     SEL alias = NSSelectorFromString([@"__dh_orig_" stringByAppendingString:selectorName]);
     IMP origIMP = method_getImplementation(m);
-    class_addMethod(target, alias, origIMP, types);                  // 原实现 → 别名
+    // 先保存原实现到别名; 若别名已存在(addMethod 返回 NO)则无法保存, 直接拒绝——
+    // 否则继续把 sel 换成 _objc_msgForward 会永久丢失原实现。保证"hook 成功 ⟹ alias 一定在",
+    // trampoline 热路径的 aliasMethod 检查因此成为纯防御。
+    if (!class_addMethod(target, alias, origIMP, types)) {
+        os_unfair_lock_unlock(&gLock);
+        return [NSString stringWithFormat:@"无法保存 %@ 的原实现(别名冲突), 拒绝 hook", selectorName];
+    }
     class_replaceMethod(target, sel, (IMP)_objc_msgForward, types);  // 目标 → 转发
     [self _ensureForwardSwizzled:target];
 
