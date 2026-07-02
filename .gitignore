@@ -4,6 +4,7 @@
 *.a
 *.dSYM/
 *.profraw
+tests/exercise_runner
 
 # 注入脚本中间产物
 work_*/
