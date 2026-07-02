@@ -39,6 +39,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
+// 熔断告警回调: 某方法触发频率爆表被自动卸载时调用(供 DHJSEngine 转成脚本事件)。
+void dh_objc_set_fuse_notify(void (*fn)(NSString *className, NSString *selName));
+
 NS_ASSUME_NONNULL_END
 
 #endif // DH_HOOK_OBJC_ENGINE_H

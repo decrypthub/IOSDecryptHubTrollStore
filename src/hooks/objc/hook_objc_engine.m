@@ -14,8 +14,14 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <os/lock.h>
+#import <time.h>
 
 extern void _objc_msgForward(void);   // 运行时转发入口, 用作 IMP
+
+static const uint64_t kFuseThreshold = 5000;   // 单方法每秒触发超此值 → 熔断(自动卸载), 防手滑 hook 高频方法卡死
+static void (*gFuseNotify)(NSString *className, NSString *selName) = NULL;
+void dh_objc_set_fuse_notify(void (*fn)(NSString *, NSString *)) { gFuseNotify = fn; }
+static uint64_t dh_mono_sec(void) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); return (uint64_t)ts.tv_sec; }
 
 // ---- hook 记录 ----
 @interface DHHookInfo : NSObject
@@ -28,39 +34,60 @@ extern void _objc_msgForward(void);   // 运行时转发入口, 用作 IMP
 @property (nonatomic, copy) NSString *className;
 @property (nonatomic, copy) NSString *selName;
 @property (nonatomic) BOOL classMethod;
+@property (nonatomic) uint64_t fuseHits;         // 当前窗口内触发次数(gLock 保护, 熔断用)
+@property (nonatomic) uint64_t fuseWindowSec;    // 当前窗口整秒时间戳
 @end
 @implementation DHHookInfo
 @end
 
 // ---- 全局注册表 ----
-static NSMutableDictionary<NSString *, DHHookInfo *> *gHooks;      // key = "cls指针#selName"
-static NSMutableSet<NSValue *>                       *gSwizzled;   // 已接管 forwardInvocation: 的类
-static os_unfair_lock                                 gLock = OS_UNFAIR_LOCK_INIT;
-
-static NSString *hookKey(Class cls, NSString *selName) {
-    return [NSString stringWithFormat:@"%p#%@", (void *)cls, selName];
-}
+// Class → (selName → DHHookInfo)。用 NSMapTable(Class 指针 key) 替代字符串 key, 去掉热路径 stringWithFormat 拼接。
+static NSMapTable<Class, NSMutableDictionary<NSString *, DHHookInfo *> *> *gClassHooks;
+static NSMutableSet<NSValue *>                                            *gSwizzled;   // 已接管 forwardInvocation: 的类
+static os_unfair_lock                                                      gLock = OS_UNFAIR_LOCK_INIT;
 
 static BOOL DHSelBlacklisted(NSString *sel) {
     static NSSet *bl; static dispatch_once_t once;
     dispatch_once(&once, ^{
         bl = [NSSet setWithArray:@[
-            @"dealloc", @"release", @"retain", @"autorelease", @"retainCount", @"_tryRetain",
+            // 内存管理: hook 破坏引用计数语义
+            @"dealloc", @"release", @"retain", @"autorelease", @"retainCount", @"_tryRetain", @"allowsWeakReference",
+            // 转发/自省: 与引擎自身 forwardInvocation 机制冲突
             @"forwardInvocation:", @"methodSignatureForSelector:", @"forwardingTargetForSelector:",
-            @"respondsToSelector:", @"class", @"self", @"isKindOfClass:", @"allowsWeakReference",
+            @"respondsToSelector:", @"class", @"self", @"isKindOfClass:",
+            // +1 所有权工厂方法: 改返回值会 ARC over-release 崩溃
+            @"alloc", @"allocWithZone:", @"new", @"copy", @"copyWithZone:", @"mutableCopy", @"mutableCopyWithZone:",
+            // 可变参数方法: NSInvocation 无法表达 va_list, hook 后 invoke 会读野指针/行为错乱
+            @"stringWithFormat:", @"stringByAppendingFormat:", @"appendFormat:", @"initWithFormat:",
+            @"localizedStringWithFormat:", @"predicateWithFormat:",
+            @"arrayWithObjects:", @"dictionaryWithObjectsAndKeys:", @"setWithObjects:",
         ]];
     });
     return [bl containsObject:sel];
 }
 
-// 沿 superclass 链查 hook 记录(受 gLock 保护)。
-static DHHookInfo *lookupHook(Class start, SEL sel) {
+// 沿 superclass 链查 hook 记录 + 高频熔断统计(受 gLock 保护)。
+// 命中后统计当前秒触发次数, 超 kFuseThreshold 则就地卸载(恢复 IMP + 移除表)并置 *outFused,
+// 防手滑 hook 高频方法把 App 卡死。恢复 IMP 是原子替换, 正在执行的本次调用走 alias 不受影响。
+static DHHookInfo *lookupHook(Class start, SEL sel, BOOL *outFused) {
+    if (outFused) *outFused = NO;
     NSString *sn = NSStringFromSelector(sel);
     DHHookInfo *found = nil;
     os_unfair_lock_lock(&gLock);
     for (Class c = start; c; c = class_getSuperclass(c)) {
-        DHHookInfo *h = gHooks[hookKey(c, sn)];
-        if (h) { found = h; break; }
+        NSMutableDictionary *m = [gClassHooks objectForKey:c];
+        if (m) { found = m[sn]; if (found) break; }
+    }
+    if (found) {
+        uint64_t nowSec = dh_mono_sec();
+        if (found.fuseWindowSec != nowSec) { found.fuseWindowSec = nowSec; found.fuseHits = 0; }
+        if (++found.fuseHits > kFuseThreshold) {
+            if (found.cls && found.origIMP)
+                class_replaceMethod(found.cls, found.sel, found.origIMP, found.types.UTF8String ?: "v@:@");
+            NSMutableDictionary *bucket = [gClassHooks objectForKey:found.cls];
+            [bucket removeObjectForKey:found.selName];
+            if (outFused) *outFused = YES;
+        }
     }
     os_unfair_lock_unlock(&gLock);
     return found;
@@ -69,8 +96,15 @@ static DHHookInfo *lookupHook(Class start, SEL sel) {
 // 统一 forwardInvocation: trampoline。
 static void dh_forwardInvocation(id self, SEL _cmd, NSInvocation *inv) {
     SEL sel = inv.selector;
-    DHHookInfo *info = lookupHook(object_getClass(self), sel);
+    BOOL fused = NO;
+    DHHookInfo *info = lookupHook(object_getClass(self), sel, &fused);
     if (info) {
+        if (fused) {   // 已熔断卸载: 本次仍跑原实现, 之后调用走恢复的 IMP(不再进 trampoline)
+            if (gFuseNotify) gFuseNotify(info.className, info.selName);
+            @try { inv.selector = info.alias; if ([self respondsToSelector:info.alias]) [inv invoke]; }
+            @catch (__unused NSException *e) {}
+            return;
+        }
         @try {
             id<DHInvocationHandler> h = info.handler;
             inv.selector = info.alias;          // 之后 invoke 即跑原实现
@@ -102,7 +136,7 @@ static void dh_forwardInvocation(id self, SEL _cmd, NSInvocation *inv) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         s = [DHObjCEngine new];
-        gHooks = [NSMutableDictionary dictionary];
+        gClassHooks = [NSMapTable strongToStrongObjectsMapTable];
         gSwizzled = [NSMutableSet set];
     });
     return s;
@@ -144,8 +178,8 @@ static void dh_forwardInvocation(id self, SEL _cmd, NSInvocation *inv) {
     if (!sig) return @"方法签名不受支持, 拒绝 hook";
 
     os_unfair_lock_lock(&gLock);
-    NSString *key = hookKey(target, selectorName);
-    DHHookInfo *existing = gHooks[key];
+    NSMutableDictionary *bucket = [gClassHooks objectForKey:target];
+    DHHookInfo *existing = bucket[selectorName];
     if (existing) { existing.handler = handler; os_unfair_lock_unlock(&gLock); return nil; }
 
     SEL alias = NSSelectorFromString([@"__dh_orig_" stringByAppendingString:selectorName]);
@@ -159,25 +193,29 @@ static void dh_forwardInvocation(id self, SEL _cmd, NSInvocation *inv) {
     info.types = [NSString stringWithUTF8String:types];
     info.handler = handler; info.className = className; info.selName = selectorName;
     info.classMethod = isClassMethod;
-    gHooks[key] = info;
+    if (!bucket) { bucket = [NSMutableDictionary dictionary]; [gClassHooks setObject:bucket forKey:target]; }
+    bucket[selectorName] = info;
     os_unfair_lock_unlock(&gLock);
     return nil;
 }
 
 - (void)unhookAll {
     os_unfair_lock_lock(&gLock);
-    for (DHHookInfo *info in gHooks.allValues) {
-        if (info.cls && info.origIMP)
-            class_replaceMethod(info.cls, info.sel, info.origIMP, info.types.UTF8String ?: "v@:@");
+    for (NSMutableDictionary *bucket in [gClassHooks objectEnumerator]) {
+        for (DHHookInfo *info in bucket.allValues) {
+            if (info.cls && info.origIMP)
+                class_replaceMethod(info.cls, info.sel, info.origIMP, info.types.UTF8String ?: "v@:@");
+        }
     }
-    [gHooks removeAllObjects];
-    // forwardInvocation: 的接管保持(gHooks 空 → 未命中 → 链回原实现), 下次 hook 可复用。
+    [gClassHooks removeAllObjects];
+    // forwardInvocation: 的接管保持(表空 → 未命中 → 链回原实现), 下次 hook 可复用。
     os_unfair_lock_unlock(&gLock);
 }
 
 - (NSUInteger)activeHookCount {
     os_unfair_lock_lock(&gLock);
-    NSUInteger n = gHooks.count;
+    NSUInteger n = 0;
+    for (NSMutableDictionary *bucket in [gClassHooks objectEnumerator]) n += bucket.count;
     os_unfair_lock_unlock(&gLock);
     return n;
 }

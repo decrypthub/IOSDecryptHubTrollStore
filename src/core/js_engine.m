@@ -21,6 +21,12 @@
 // jsQueue 身份标记, 用于 dispatch_get_specific 判断「当前是否已在 jsQueue」以避免 dispatch_sync 自死锁。
 static void *kJSQueueKey = &kJSQueueKey;
 
+// ObjC 引擎熔断告警(某方法触发频率爆表被自动卸载) → 转成脚本事件。
+static void dh_js_fuse_notify(NSString *cls, NSString *sel) {
+    [[DHJSEngine shared] emitEvent:@"warn"
+        text:[NSString stringWithFormat:@"⛔ [%@ %@] 触发频率爆表, 已自动熔断卸载(防卡死)", cls, sel]];
+}
+
 @interface DHJSEngine (Internal)
 - (BOOL)runProtected:(void (^)(void))block;   // jsQueue + dh_in_script 内跑 block; 返回 NO=抛异常
 - (void)_jsRegisterObjCHook:(JSValue *)cfg;
@@ -432,6 +438,7 @@ static const NSUInteger kMaxEvents = 5000;   // 事件环形缓冲上限, 超出
         _natWindowStart = DHMonoNow();
         _evSeq   = 0;
         _evTotal = 0;
+        dh_objc_set_fuse_notify(dh_js_fuse_notify);   // ObjC 熔断告警 → 脚本事件
         dispatch_sync(_jsQueue, ^{ [self _setupContextLocked]; });
     }
     return self;
