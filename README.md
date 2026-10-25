@@ -9,32 +9,15 @@ IOSDecryptHub 是一个注入到 iOS App 进程中的运行时分析 dylib，可
 
 完整能力与效果演示请访问：[ios.decrypthub.com](https://ios.decrypthub.com/)
 
-## 版本与维护分支
+## 两个独立项目
 
-巨魔版与越狱版采用两个长期分支独立维护：
+本仓库维护 **巨魔版（TrollStore）**，能力基本定型，重点维护兼容性、稳定性和现有注入 / Web / MCP 使用方式。
 
-| 版本 | 维护分支 | 定位与开发方向 |
-|------|----------|----------------|
-| 巨魔版（TrollStore） | [`main`](https://github.com/taisuii/IOSDecryptHub/tree/main)（默认分支） | 面向免越狱注入，维护 TrollStore 管理器、IPA 注入、fishhook / ObjC swizzle 与现有 Web / MCP 分析能力，优先保证兼容性与稳定性 |
-| 越狱版（Jailbreak） | [`jailbreak`](https://github.com/taisuii/IOSDecryptHub/tree/jailbreak) | 面向 rootless / roothide 越狱环境，在现有能力上持续开发更强的运行时分析功能，包括 Inline Hook、Trace 等 |
+越狱版已迁为独立项目 [IOSDecryptHubJB](https://github.com/taisuii/IOSDecryptHubJB)，采用手机常驻守护程序、管理 UI、注入 Loader 与 Agent 的完整 deb，规划逐应用注入开关、越狱源统一更新以及 Inline Hook / Trace。
 
-```bash
-git fetch origin
-git switch main        # 巨魔版开发与维护
-git switch jailbreak   # 越狱版开发与维护；首次切换时自动跟踪 origin/jailbreak
-```
+两个项目各自维护 main、版本和发布，不再通过本仓的两个长期分支区分产品；历史 jailbreak 分支保留追溯，不再作为开发入口。适用修复按需移植。
 
-公共引擎修复按需通过 `git cherry-pick -x <commit>` 同步，并分别验证两端兼容性；平台专属功能只进入对应分支。越狱版增强功能不整分支合回 `main`，避免引入免越狱环境不支持的依赖。后续发布分别使用 `trollstore-v<版本号>` / `jailbreak-v<版本号>` 标签，历史 `v*` 标签保持不变。
-
-### 越狱版后续规划
-
-以下是 `jailbreak` 分支的开发方向，**本次分支拆分不代表这些增强功能已经实现**：
-
-- **Inline Hook**：面向静态链接函数、同镜像内部直接调用和自研算法等 fishhook 无法覆盖的调用点，逐步支持参数、返回值与内存快照观测。
-- **Trace**：逐步提供函数调用追踪、调用链分析，并探索指令级执行追踪，帮助定位关键算法及数据流。
-- **分析联动**：将越狱扩展产生的事件接入现有 Web / MCP，提供可控的启停、过滤与导出能力。
-
-高级能力需按设备权限、架构和运行环境检测后启用；Inline Hook / Trace 实现保持在越狱专属扩展中，共用引擎继续使用 fishhook + ObjC swizzle。详细约束见 [架构边界](./docs/ARCHITECTURE_BOUNDARY.md)。
+越狱版目前处于独立工程与设计迁移阶段，新整包和高级能力尚未实现。详见 [越狱产品架构](https://github.com/taisuii/IOSDecryptHubJB/blob/main/docs/PRODUCT_ARCHITECTURE.md)。
 
 ## 获取 dylib
 
@@ -107,19 +90,10 @@ idh mcp
 |------|------|------|
 | dev（默认） | `make` | 开发者手动注入 / 本地调试 |
 | trollstore | `make VARIANT=trollstore` | 巨魔注入器 / 管理器 IPA |
-| rootless | `make VARIANT=rootless` | 越狱 deb 包 |
 
-### 越狱 deb 包（rootless / roothide）
+### 越狱版
 
-请先切换到 `jailbreak` 分支。打包还依赖并列仓库 `../IOSDecryptHubJB/`（也可通过 `DH_JB_DIR` 指定路径），详见 [越狱打包说明](./jailbreak/README.md)。
-
-```bash
-make deb              # 同时构建普通 rootless 与 roothide 包
-make deb-rootless     # 普通 rootless（arm64）
-make deb-roothide     # roothide（arm64e）
-```
-
-产物在 `build/deb/`。必须安装与设备环境对应的包；roothide 不可安装普通 rootless 包，否则设置面板会因 `arm64` / `arm64e` 不兼容而无法加载。
+越狱完整 deb 的构建、安装与源更新由 [IOSDecryptHubJB](https://github.com/taisuii/IOSDecryptHubJB) 独立项目负责。本仓历史 rootless / deb 入口保留兼容记录，不作为新产品构建流程。
 
 ## 注意事项
 

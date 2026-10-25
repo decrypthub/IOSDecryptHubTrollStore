@@ -2,7 +2,7 @@ name: Build 解密助手 dylib
 
 on:
   push:
-    branches: [ main, jailbreak ]
+    branches: [ main ]
   workflow_dispatch:
     inputs:
       ipa_url:
@@ -13,7 +13,7 @@ jobs:
   build:
     runs-on: macos-latest
     env:
-      DH_BUILD_VARIANT: ${{ github.ref_name == 'jailbreak' && 'rootless' || 'trollstore' }}
+      DH_BUILD_VARIANT: trollstore
 
     steps:
       - name: Checkout

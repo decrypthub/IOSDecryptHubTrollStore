@@ -8,32 +8,15 @@ IOSDecryptHub is a runtime-analysis dylib injected into iOS app processes. It ca
 
 For the full feature set and a live demo, visit: [ios.decrypthub.com](https://ios.decrypthub.com/)
 
-## Editions and Maintenance Branches
+## Separate Projects
 
-The TrollStore and Jailbreak editions are maintained on two long-lived branches:
+This repository maintains the largely settled **TrollStore edition**, focusing on compatibility, stability and its existing injection / web / MCP workflows.
 
-| Edition | Branch | Focus |
-|---------|--------|-------|
-| TrollStore | [`main`](https://github.com/taisuii/IOSDecryptHub/tree/main) (default) | Non-jailbroken injection, the TrollStore manager, IPA injection, fishhook / ObjC swizzle, and existing web / MCP analysis, with compatibility and stability as priorities |
-| Jailbreak | [`jailbreak`](https://github.com/taisuii/IOSDecryptHub/tree/jailbreak) | Rootless / roothide devices, with more advanced runtime analysis planned, including Inline Hook and Trace |
+The Jailbreak edition is now the independent [IOSDecryptHubJB](https://github.com/taisuii/IOSDecryptHubJB) project: a complete deb with a persistent phone daemon, Manager UI, loader and Agent, with per-app injection controls, APT updates, Inline Hook and Trace planned.
 
-```bash
-git fetch origin
-git switch main        # TrollStore development and maintenance
-git switch jailbreak   # Jailbreak development; tracks origin/jailbreak on first checkout
-```
+Each project maintains its own main branch, versions and releases. The historical jailbreak branch is retained for reference, not active product development. Port applicable fixes explicitly.
 
-Port shared engine fixes as needed with `git cherry-pick -x <commit>` and verify both editions separately. Keep platform-specific features on their respective branches; do not merge the entire Jailbreak branch back into `main`. Future releases use `trollstore-v<version>` / `jailbreak-v<version>` tags; existing `v*` tags remain unchanged.
-
-### Jailbreak Roadmap
-
-The following features are planned for `jailbreak`; **creating these branches does not mean these enhancements are implemented**:
-
-- **Inline Hook**: cover statically linked functions, direct calls within an image and custom algorithms that fishhook cannot intercept, with argument, return-value and memory-snapshot inspection.
-- **Trace**: add function-call tracing and call-chain analysis, and explore instruction-level execution tracing for algorithm and data-flow analysis.
-- **Analysis integration**: feed extension events into the existing web / MCP interfaces, with start/stop controls, filtering and export.
-
-Enable advanced capabilities only after checking device permissions, architecture and runtime support. Keep Inline Hook / Trace implementations in Jailbreak-only extensions; the shared engine continues to use fishhook + ObjC swizzle. See [Architecture Boundaries](./docs/ARCHITECTURE_BOUNDARY.md).
+The new Jailbreak package and advanced features are not implemented yet. See its [product architecture](https://github.com/taisuii/IOSDecryptHubJB/blob/main/docs/PRODUCT_ARCHITECTURE.md).
 
 ## Getting the dylib
 
@@ -106,21 +89,10 @@ idh mcp
 |---------|---------|---------|
 | dev (default) | `make` | Manual injection / local debugging for developers |
 | trollstore | `make VARIANT=trollstore` | TrollStore injector / manager IPA |
-| rootless | `make VARIANT=rootless` | Jailbreak deb package |
 
-### Jailbreak deb Package (Rootless / roothide)
+### Jailbreak Edition
 
-Switch to `jailbreak` before packaging. This also requires the sibling repository `../IOSDecryptHubJB/` (or a path set through `DH_JB_DIR`); see [Jailbreak Packaging](./jailbreak/README.md).
-
-```bash
-make deb              # Build both standard rootless and roothide packages
-make deb-rootless     # Standard rootless (arm64)
-make deb-roothide     # roothide (arm64e)
-```
-
-Artifacts land in `build/deb/`. Install the package matching the device environment; a standard
-rootless package cannot be used on roothide because its arm64 Settings bundle cannot load into an
-arm64e process.
+Complete deb builds, installation and APT updates belong to [IOSDecryptHubJB](https://github.com/taisuii/IOSDecryptHubJB). Historical rootless / deb entries here remain for legacy reference.
 
 ## Notes
 

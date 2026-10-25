@@ -1,23 +1,7 @@
-# 越狱插件源码已迁出
+# 历史越狱入口
 
-本仓库的越狱版由 [`jailbreak`](https://github.com/taisuii/IOSDecryptHub/tree/jailbreak) 分支独立维护，`main` 为巨魔版维护分支。越狱开发与打包前先执行 `git fetch origin`、`git switch jailbreak`。
+越狱版已迁为独立 [IOSDecryptHubJB](https://github.com/taisuii/IOSDecryptHubJB) 项目，使用自己的 main、版本与整包发布。
 
-加载器、设置面板和 deb 打包脚本现在位于工作区并列仓库：
+本目录旧跨仓脚本保留追溯，不再作为新产品开发和打包入口。新版设计由一次任务构建常驻 daemon、Manager UI、Loader 和 Agent 并打入完整 deb，通过 APT 源统一更新，用户无需单独处理 dylib。
 
-```
-../IOSDecryptHubJB/
-```
-
-本目录只保留入口脚本：编译闭源 `decrypt_helper.dylib`，拷进 `IOSDecryptHubJB/vendor/dylib/`，再调用开源仓打包。
-
-并列仓库不在默认位置时，可用 `DH_JB_DIR` 指定其路径。
-
-```bash
-make deb              # 仍从本私有仓触发，产物同步到 build/deb/
-make deb-rootless
-make deb-roothide
-```
-
-不要在本目录重新放入加载器源码。越狱层必须保持为薄加载器，源码以开源仓为准。
-
-后续将在 `jailbreak` 维护线推进 Inline Hook、函数调用 Trace / 调用链分析，并探索指令级追踪；这些目前属于规划。高级能力由越狱侧独立扩展承载，保持共享 `src/` 的 fishhook + ObjC swizzle 边界，详见 [架构约束](../docs/ARCHITECTURE_BOUNDARY.md)。
+新整包与高级能力尚未实现；状态见独立项目文档。
