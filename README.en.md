@@ -12,15 +12,15 @@ For the full feature set and a live demo, visit: [ios.decrypthub.com](https://io
 
 This repository maintains the largely settled **TrollStore edition**, focusing on compatibility, stability and its existing injection / web / MCP workflows.
 
-The Jailbreak edition is now the independent [IOSDecryptHubJB](https://github.com/taisuii/IOSDecryptHubJB) project: a complete deb with a persistent phone daemon, Manager UI, loader and Agent, with per-app injection controls, APT updates, Inline Hook and Trace planned.
+The Jailbreak edition is now the independent [IOSDecryptHubJB](https://github.com/decrypthub/IOSDecryptHubJB) project: a complete deb with a persistent phone daemon, Manager UI, loader and Agent, with per-app injection controls, APT updates, Inline Hook and Trace planned.
 
 Each project maintains its own main branch, versions and releases. The historical jailbreak branch is retained for reference, not active product development. Port applicable fixes explicitly.
 
-The new Jailbreak package and advanced features are not implemented yet. See its [product architecture](https://github.com/taisuii/IOSDecryptHubJB/blob/main/docs/PRODUCT_ARCHITECTURE.md).
+The new Jailbreak package and advanced features are not implemented yet. See its [product architecture](https://github.com/decrypthub/IOSDecryptHubJB/blob/main/docs/PRODUCT_ARCHITECTURE.md).
 
 ## Getting the dylib
 
-Download `decrypt_helper.dylib` from [GitHub Releases](https://github.com/taisuii/IOSDecryptHub/releases), or build it yourself:
+Download `decrypt_helper.dylib` from [GitHub Releases](https://github.com/decrypthub/IOSDecryptHubTrollStore/releases), or build it yourself:
 
 ```bash
 make
@@ -92,7 +92,7 @@ idh mcp
 
 ### Jailbreak Edition
 
-Complete deb builds, installation and APT updates belong to [IOSDecryptHubJB](https://github.com/taisuii/IOSDecryptHubJB). Historical rootless / deb entries here remain for legacy reference.
+Complete deb builds, installation and APT updates belong to [IOSDecryptHubJB](https://github.com/decrypthub/IOSDecryptHubJB). Historical rootless / deb entries here remain for legacy reference.
 
 ## Notes
 
@@ -100,7 +100,7 @@ Complete deb builds, installation and APT updates belong to [IOSDecryptHubJB](ht
 - Injection, re-signing and decryption capabilities depend on the device environment and the target app's protections.
 - Do not post captured keys, passwords, plaintext or other sensitive data to public issues.
 
-Report problems via [GitHub Issues](https://github.com/taisuii/IOSDecryptHub/issues/new/choose).
+Report problems via [GitHub Issues](https://github.com/decrypthub/IOSDecryptHubTrollStore/issues/new/choose).
 
 ## License
 

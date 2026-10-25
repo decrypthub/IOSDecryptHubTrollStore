@@ -13,15 +13,15 @@ IOSDecryptHub 是一个注入到 iOS App 进程中的运行时分析 dylib，可
 
 本仓库维护 **巨魔版（TrollStore）**，能力基本定型，重点维护兼容性、稳定性和现有注入 / Web / MCP 使用方式。
 
-越狱版已迁为独立项目 [IOSDecryptHubJB](https://github.com/taisuii/IOSDecryptHubJB)，采用手机常驻守护程序、管理 UI、注入 Loader 与 Agent 的完整 deb，规划逐应用注入开关、越狱源统一更新以及 Inline Hook / Trace。
+越狱版已迁为独立项目 [IOSDecryptHubJB](https://github.com/decrypthub/IOSDecryptHubJB)，采用手机常驻守护程序、管理 UI、注入 Loader 与 Agent 的完整 deb，规划逐应用注入开关、越狱源统一更新以及 Inline Hook / Trace。
 
 两个项目各自维护 main、版本和发布，不再通过本仓的两个长期分支区分产品；历史 jailbreak 分支保留追溯，不再作为开发入口。适用修复按需移植。
 
-越狱版目前处于独立工程与设计迁移阶段，新整包和高级能力尚未实现。详见 [越狱产品架构](https://github.com/taisuii/IOSDecryptHubJB/blob/main/docs/PRODUCT_ARCHITECTURE.md)。
+越狱版目前处于独立工程与设计迁移阶段，新整包和高级能力尚未实现。详见 [越狱产品架构](https://github.com/decrypthub/IOSDecryptHubJB/blob/main/docs/PRODUCT_ARCHITECTURE.md)。
 
 ## 获取 dylib
 
-从 [官网首页](https://ios.decrypthub.com/) 或 [GitHub Releases](https://github.com/taisuii/IOSDecryptHub/releases) 下载 `decrypt_helper.dylib`，或自行编译：
+从 [官网首页](https://ios.decrypthub.com/) 或 [GitHub Releases](https://github.com/decrypthub/IOSDecryptHubTrollStore/releases) 下载 `decrypt_helper.dylib`，或自行编译：
 
 ```bash
 make
@@ -93,7 +93,7 @@ idh mcp
 
 ### 越狱版
 
-越狱完整 deb 的构建、安装与源更新由 [IOSDecryptHubJB](https://github.com/taisuii/IOSDecryptHubJB) 独立项目负责。本仓历史 rootless / deb 入口保留兼容记录，不作为新产品构建流程。
+越狱完整 deb 的构建、安装与源更新由 [IOSDecryptHubJB](https://github.com/decrypthub/IOSDecryptHubJB) 独立项目负责。本仓历史 rootless / deb 入口保留兼容记录，不作为新产品构建流程。
 
 ## 注意事项
 
@@ -101,7 +101,7 @@ idh mcp
 - 注入、重签和脱壳能力受设备环境及目标 App 保护机制影响。
 - 请勿将捕获到的 Key、口令、明文或其他敏感数据提交到公开 Issue。
 
-遇到问题可在 [GitHub Issues](https://github.com/taisuii/IOSDecryptHub/issues/new/choose) 反馈。
+遇到问题可在 [GitHub Issues](https://github.com/decrypthub/IOSDecryptHubTrollStore/issues/new/choose) 反馈。
 
 ## 协议
 
