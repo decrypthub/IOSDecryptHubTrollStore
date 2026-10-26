@@ -17,19 +17,19 @@ IOSDecryptHub 是一个注入到 iOS App 进程中的运行时分析 dylib，可
 
 两个项目各自维护 main、版本和发布，不再通过本仓的两个长期分支区分产品；历史 jailbreak 分支保留追溯，不再作为开发入口。适用修复按需移植。
 
-越狱版目前处于独立工程与设计迁移阶段，新整包和高级能力尚未实现。详见 [越狱产品架构](https://github.com/decrypthub/IOSDecryptHubJB/blob/main/docs/PRODUCT_ARCHITECTURE.md)。
+越狱版已恢复完整 v1 基线并提供独立完整 deb；常驻分析服务、新 UI、Inline Hook 与 Trace 继续按路线图开发。详见 [越狱产品架构](https://github.com/decrypthub/IOSDecryptHubJB/blob/main/docs/PRODUCT_ARCHITECTURE.md)。
 
 ## 获取 dylib
 
-当前正式下载沿用组织原公开仓的 **v1.27.5**。本仓继承的旧 Release 仅作历史记录，不是最新正式下载；拆分后的独立版本尚未发布。
+当前独立维护版本为 **v1.27.6**，已对齐组织正式 v1 源码。本轮为基线与发布入口维护，保持现有巨魔能力；旧 Release 保留用于追溯。
 
-从 [官网首页](https://ios.decrypthub.com/) 或 [GitHub Releases](https://github.com/decrypthub/IOSDecryptHub/releases/tag/v1.27.5) 下载 `decrypt_helper.dylib`，或自行编译：
+从 [官网首页](https://ios.decrypthub.com/) 或 [GitHub Releases](https://github.com/decrypthub/IOSDecryptHubTrollStore/releases/tag/v1.27.6) 下载 `decrypt_helper.dylib`，或自行编译：
 
 ```bash
-make
+make VARIANT=trollstore dist
 ```
 
-编译产物位于项目根目录：`decrypt_helper.dylib`。
+编译产物位于项目根目录：`decrypt_helper-1.27.6.dylib`。
 
 ## 使用方法
 

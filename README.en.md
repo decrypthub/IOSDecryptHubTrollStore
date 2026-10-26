@@ -8,6 +8,8 @@ IOSDecryptHub is a runtime-analysis dylib injected into iOS app processes. It ca
 
 For the full feature set and a live demo, visit: [ios.decrypthub.com](https://ios.decrypthub.com/)
 
+Current independent maintenance release: **v1.27.6**, aligned with the organization’s official v1 source. TrollStore capabilities remain unchanged. [Download v1.27.6](https://github.com/decrypthub/IOSDecryptHubTrollStore/releases/tag/v1.27.6).
+
 ## Separate Projects
 
 This repository maintains the largely settled **TrollStore edition**, focusing on compatibility, stability and its existing injection / web / MCP workflows.
@@ -16,19 +18,19 @@ The Jailbreak edition is now the independent [IOSDecryptHubJB](https://github.co
 
 Each project maintains its own main branch, versions and releases. The historical jailbreak branch is retained for reference, not active product development. Port applicable fixes explicitly.
 
-The new Jailbreak package and advanced features are not implemented yet. See its [product architecture](https://github.com/decrypthub/IOSDecryptHubJB/blob/main/docs/PRODUCT_ARCHITECTURE.md).
+The Jailbreak project now builds complete v1 packages independently. Its persistent analysis daemon, new Manager and Inline Hook / Trace remain planned. See its [product architecture](https://github.com/decrypthub/IOSDecryptHubJB/blob/main/docs/PRODUCT_ARCHITECTURE.md).
 
 ## Getting the dylib
 
-The current official download remains **v1.27.5** from the original public repository. Older releases inherited by this split repository are historical; a separate edition release has not been published.
+The official download is **v1.27.6** from this independent repository. Older releases remain available for reference.
 
-Download `decrypt_helper.dylib` from [GitHub Releases](https://github.com/decrypthub/IOSDecryptHub/releases/tag/v1.27.5), or build it yourself:
+Download `decrypt_helper.dylib` from [GitHub Releases](https://github.com/decrypthub/IOSDecryptHubTrollStore/releases/tag/v1.27.6), or build it yourself:
 
 ```bash
-make
+make VARIANT=trollstore dist
 ```
 
-The build artifact is placed at the project root: `decrypt_helper.dylib`.
+The build artifact is placed at the project root: `decrypt_helper-1.27.6.dylib`.
 
 ## Usage
 
