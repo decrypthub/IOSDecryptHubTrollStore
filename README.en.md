@@ -20,7 +20,9 @@ The new Jailbreak package and advanced features are not implemented yet. See its
 
 ## Getting the dylib
 
-Download `decrypt_helper.dylib` from [GitHub Releases](https://github.com/decrypthub/IOSDecryptHubTrollStore/releases), or build it yourself:
+The current official download remains **v1.27.5** from the original public repository. Older releases inherited by this split repository are historical; a separate edition release has not been published.
+
+Download `decrypt_helper.dylib` from [GitHub Releases](https://github.com/decrypthub/IOSDecryptHub/releases/tag/v1.27.5), or build it yourself:
 
 ```bash
 make

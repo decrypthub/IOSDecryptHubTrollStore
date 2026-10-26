@@ -21,7 +21,9 @@ IOSDecryptHub 是一个注入到 iOS App 进程中的运行时分析 dylib，可
 
 ## 获取 dylib
 
-从 [官网首页](https://ios.decrypthub.com/) 或 [GitHub Releases](https://github.com/decrypthub/IOSDecryptHubTrollStore/releases) 下载 `decrypt_helper.dylib`，或自行编译：
+当前正式下载沿用组织原公开仓的 **v1.27.5**。本仓继承的旧 Release 仅作历史记录，不是最新正式下载；拆分后的独立版本尚未发布。
+
+从 [官网首页](https://ios.decrypthub.com/) 或 [GitHub Releases](https://github.com/decrypthub/IOSDecryptHub/releases/tag/v1.27.5) 下载 `decrypt_helper.dylib`，或自行编译：
 
 ```bash
 make
