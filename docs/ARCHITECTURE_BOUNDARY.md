@@ -1,8 +1,8 @@
 # IOSDecryptHub 架构边界文档（铁律）
 
 > **本仓现只维护巨魔版**，以下双轨/越狱条款保留为旧共享引擎的历史边界。巨魔版继续遵守 fishhook + ObjC swizzle 与宿主稳定性约束。
-> 新越狱产品在独立 [IOSDecryptHubJB](https://github.com/decrypthub/IOSDecryptHubJB) 开发，以其产品架构为准；本仓不再要求共享核心，不再通过 jailbreak 分支发布新产品。
-> 最后更新：2026-10-25
+> 越狱产品自 2026-11-16 在独立 [IOSDecryptHub](https://github.com/decrypthub/IOSDecryptHub) 主仓开发，承接原 IOSDecryptHubJB；以其产品架构为准。本仓不再要求共享核心，不再通过 jailbreak 分支发布新产品。
+> 最后更新：2026-11-16。下文旧并列仓名和跨仓打包说明仅为历史边界；当前入口以本段与本仓 AGENTS.md 为准。
 
 ---
 

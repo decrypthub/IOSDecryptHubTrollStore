@@ -1,4 +1,4 @@
-# AGENTS.md — IOSDecryptHub 主仓库开发指南
+# AGENTS.md — IOSDecryptHubTrollStore 巨魔版开发指南
 
 Always respond in Chinese-simplified
 
@@ -11,7 +11,7 @@ Always respond in Chinese-simplified
 
 IOSDecryptHub 是一个 iOS 运行时安全分析 dylib。注入目标 App 进程后，实时捕获加解密（CommonCrypto / SecKey / OpenSSL EVP）、文件、网络、Keychain、动态加载行为，提供 Web 面板 + MCP 分析服务 + 脱壳能力。
 
-本仓库维护基本定型的 TrollStore 巨魔版；越狱版已迁为独立项目 `IOSDecryptHubJB`（并列目录 `../IOSDecryptHubJB`）。两项目各自维护 main、版本与发布，不再保持同一核心或通过本仓分支区分产品。新越狱整包与常驻 daemon / 手机 UI / 逐应用注入 / APT 更新以该项目文档为准。
+本仓库维护基本定型的 TrollStore 巨魔版；越狱版自 2026-11-16 归并至独立主仓 `IOSDecryptHub`（并列目录 `../IOSDecryptHub`），原 IOSDecryptHubJB 不再作为开发入口。两项目各自维护 main、版本与发布，不再保持同一核心或通过本仓分支区分产品。新越狱整包与常驻 daemon / 手机 UI / 逐应用注入 / APT 更新以该项目文档为准。
 
 ---
 
@@ -53,7 +53,7 @@ IOSDecryptHub/
 | `make test-mcp` | MCP 集成测试（需 jq） |
 | `make clean` | 清理构建产物 |
 
-**本仓正式维护巨魔版**：默认 dev 用于开发，trollstore 用于产品。历史 rootless / deb 目标保留兼容记录，不作为独立 IOSDecryptHubJB 的整包流程。
+**本仓正式维护巨魔版**：默认 dev 用于开发，trollstore 用于产品。历史 rootless / deb 目标保留兼容记录，不作为独立 IOSDecryptHub 越狱主仓的整包流程。
 
 ---
 
@@ -61,7 +61,7 @@ IOSDecryptHub/
 
 完整内容见 `docs/ARCHITECTURE_BOUNDARY.md`，此处列出最关键的：
 
-- **本仓只维护巨魔版**。新越狱产品位于独立 IOSDecryptHubJB，不整仓/整分支回合
+- **本仓只维护巨魔版**。越狱产品位于独立 IOSDecryptHub 主仓，不整仓/整分支回合
 - **巨魔核心仅用 fishhook + ObjC swizzle**。不引入越狱框架 API、Inline / DBI、可执行内存或 daemon 依赖
 - **跨项目修复按需移植**。本仓不承担越狱常驻服务、手机管理 UI 或 deb / APT 整包发布
 - **不崩溃原则**：dylib 在别人进程里跑，任何 crash 都杀死宿主 App
@@ -123,7 +123,7 @@ IOSDecryptHub/
 
 ## Git 规范
 
-- 本仓产品主线：main（巨魔版）；IOSDecryptHubJB 使用自己的 main
+- 本仓产品主线：main（巨魔版）；IOSDecryptHub 越狱版使用自己的 main
 - 历史 jailbreak 分支保留追溯，不再作为新产品开发入口，不主动删除历史
 - 公共修复按需评估和移植，不要求两项目同步源码；各自版本与标签独立
 - Commit 格式：`type: 中文描述`（type = feat/fix/refactor/docs/test/style）

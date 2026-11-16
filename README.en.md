@@ -14,11 +14,11 @@ Current independent maintenance release: **v1.27.6**, aligned with the organizat
 
 This repository maintains the largely settled **TrollStore edition**, focusing on compatibility, stability and its existing injection / web / MCP workflows.
 
-The Jailbreak edition is now the independent [IOSDecryptHubJB](https://github.com/decrypthub/IOSDecryptHubJB) project: a complete deb with a persistent phone daemon, Manager UI, loader and Agent, with per-app injection controls, APT updates, Inline Hook and Trace planned.
+The Jailbreak edition is now the independent [IOSDecryptHub](https://github.com/decrypthub/IOSDecryptHub) project: a complete deb with a persistent phone daemon, Manager UI, loader and Agent, with per-app injection controls, APT updates, Inline Hook and Trace planned.
 
 Each project maintains its own main branch, versions and releases. The historical jailbreak branch is retained for reference, not active product development. Port applicable fixes explicitly.
 
-The Jailbreak project now builds complete v1 packages independently. Its persistent analysis daemon, new Manager and Inline Hook / Trace remain planned. See its [product architecture](https://github.com/decrypthub/IOSDecryptHubJB/blob/main/docs/PRODUCT_ARCHITECTURE.md).
+The Jailbreak project now builds complete v1 packages independently. Its persistent analysis daemon, new Manager and Inline Hook / Trace remain planned. See its [product architecture](https://github.com/decrypthub/IOSDecryptHub/blob/main/docs/PRODUCT_ARCHITECTURE.md).
 
 ## Getting the dylib
 
@@ -96,7 +96,7 @@ idh mcp
 
 ### Jailbreak Edition
 
-Complete deb builds, installation and APT updates belong to [IOSDecryptHubJB](https://github.com/decrypthub/IOSDecryptHubJB). Historical rootless / deb entries here remain for legacy reference.
+Complete deb builds, installation and APT updates belong to [IOSDecryptHub](https://github.com/decrypthub/IOSDecryptHub). Historical rootless / deb entries here remain for legacy reference.
 
 ## Notes
 

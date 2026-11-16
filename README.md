@@ -13,11 +13,11 @@ IOSDecryptHub 是一个注入到 iOS App 进程中的运行时分析 dylib，可
 
 本仓库维护 **巨魔版（TrollStore）**，能力基本定型，重点维护兼容性、稳定性和现有注入 / Web / MCP 使用方式。
 
-越狱版已迁为独立项目 [IOSDecryptHubJB](https://github.com/decrypthub/IOSDecryptHubJB)，采用手机常驻守护程序、管理 UI、注入 Loader 与 Agent 的完整 deb，规划逐应用注入开关、越狱源统一更新以及 Inline Hook / Trace。
+越狱版已迁为独立项目 [IOSDecryptHub 越狱版](https://github.com/decrypthub/IOSDecryptHub)，采用手机常驻守护程序、管理 UI、注入 Loader 与 Agent 的完整 deb，规划逐应用注入开关、越狱源统一更新以及 Inline Hook / Trace。
 
 两个项目各自维护 main、版本和发布，不再通过本仓的两个长期分支区分产品；历史 jailbreak 分支保留追溯，不再作为开发入口。适用修复按需移植。
 
-越狱版已恢复完整 v1 基线并提供独立完整 deb；常驻分析服务、新 UI、Inline Hook 与 Trace 继续按路线图开发。详见 [越狱产品架构](https://github.com/decrypthub/IOSDecryptHubJB/blob/main/docs/PRODUCT_ARCHITECTURE.md)。
+越狱版已恢复完整 v1 基线并提供独立完整 deb；常驻分析服务、新 UI、Inline Hook 与 Trace 继续按路线图开发。详见 [越狱产品架构](https://github.com/decrypthub/IOSDecryptHub/blob/main/docs/PRODUCT_ARCHITECTURE.md)。
 
 ## 获取 dylib
 
@@ -95,7 +95,7 @@ idh mcp
 
 ### 越狱版
 
-越狱完整 deb 的构建、安装与源更新由 [IOSDecryptHubJB](https://github.com/decrypthub/IOSDecryptHubJB) 独立项目负责。本仓历史 rootless / deb 入口保留兼容记录，不作为新产品构建流程。
+越狱完整 deb 的构建、安装与源更新由 [IOSDecryptHub 越狱版](https://github.com/decrypthub/IOSDecryptHub) 独立项目负责。本仓历史 rootless / deb 入口保留兼容记录，不作为新产品构建流程。
 
 ## 注意事项
 
