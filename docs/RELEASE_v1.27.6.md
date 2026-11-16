@@ -6,4 +6,4 @@
 
 产物：decrypt_helper-1.27.6.dylib（arm64，trollstore 变体）。Mac Xcode 编译及产物检查通过；尚未进行真机注入验收。
 
-越狱版仅从 IOSDecryptHubJB 获取完整 deb，常驻分析服务、Inline Hook 和 Trace 在越狱项目继续开发。
+越狱版完整 deb 的当前入口为 [IOSDecryptHub](https://github.com/decrypthub/IOSDecryptHub/releases/tag/v1.27.6)（原发布入口已迁移），常驻分析服务、Inline Hook 和 Trace 在越狱项目继续开发。

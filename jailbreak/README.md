@@ -1,7 +1,7 @@
-# 历史越狱入口
+# 越狱整包兼容入口
 
 越狱版由独立 [IOSDecryptHub](https://github.com/decrypthub/IOSDecryptHub) 主仓维护（2026-11-16 承接原 IOSDecryptHubJB），使用自己的 main、版本与整包发布。
 
-本目录旧跨仓脚本保留追溯，不再作为新产品开发和打包入口。新版设计由一次任务构建常驻 daemon、Manager UI、Loader 和 Agent 并打入完整 deb，通过 APT 源统一更新，用户无需单独处理 dylib。
+本仓正式维护巨魔版。旧 `make deb` / `deb-rootless` / `deb-roothide` 入口现在只转交并列 `../IOSDecryptHub` 的对应完整构建，不编译巨魔引擎、不覆盖越狱版 Makefile 版本，也不跨仓复制 dylib 或 deb。自定义越狱工作区可用 `DH_JB_DIR` 指定。
 
-新整包与高级能力尚未实现；状态见独立项目文档。
+建议直接进入 [IOSDecryptHub](https://github.com/decrypthub/IOSDecryptHub) 准备依赖并构建；实现与验证状态以该仓文档为准。

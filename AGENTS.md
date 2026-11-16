@@ -18,7 +18,7 @@ IOSDecryptHub 是一个 iOS 运行时安全分析 dylib。注入目标 App 进�
 ## 项目结构
 
 ```
-IOSDecryptHub/
+IOSDecryptHubTrollStore/
 ├── Makefile                # 唯一构建入口
 ├── src/
 │   ├── core/               # 引擎：fishhook、capture 桥接、日志、配置、capstone、脱壳
@@ -54,6 +54,8 @@ IOSDecryptHub/
 | `make clean` | 清理构建产物 |
 
 **本仓正式维护巨魔版**：默认 dev 用于开发，trollstore 用于产品。历史 rootless / deb 目标保留兼容记录，不作为独立 IOSDecryptHub 越狱主仓的整包流程。
+
+旧 `make deb` / `deb-rootless` / `deb-roothide` 兼容入口只转交并列 IOSDecryptHub 主仓的对应 make 目标。不得覆盖越狱仓 Makefile 版本，不得跨仓复制巨魔引擎或把 deb 同步回本仓；越狱主仓自行准备依赖和构建完整包。
 
 ---
 

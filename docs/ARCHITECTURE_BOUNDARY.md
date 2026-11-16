@@ -42,8 +42,8 @@
 - 允许 rootless deb 打包和 plist 偏好门控。
 - 允许加载器依赖 `/var/jb` 下的 rootless 越狱路径。
 - 越狱加载器必须保持为独立薄层，仅做：读偏好 -> 判断目标进程 -> `dlopen` 主 dylib。
-- 加载器、管理器 App 与 updater daemon 的源码位于并列开源仓 `../IOSDecryptHubJB/`。
-  （设置面板已于 2026-09-13 移除：与管理器 App 功能重复，只保留 App 一个入口。）本仓库 `make deb` 只编译闭源成品 dylib 并拷进开源仓 `vendor/dylib/`，不得把 `src/` 引擎源码放进开源仓。
+- 加载器、管理器 App 与 updater daemon 的源码位于并列开源仓 `../IOSDecryptHub/`。
+  （设置面板已于 2026-09-13 移除：与管理器 App 功能重复，只保留 App 一个入口。）当前本仓 `make deb` 只转交 IOSDecryptHub 主仓独立构建完整包，不复制巨魔引擎或修改越狱版本。
 - 不得使用 `MSHookFunction`、`%hook` 或其他越狱框架 hook API。
 - 不得引用 daemon / `dh_server` 的代码或接口。
 
@@ -83,7 +83,7 @@
 
 - inline hook 实现**不得进入 `src/`**。核心继续只用 fishhook + swizzle；`src/` 中不得
   出现 trampoline、可执行内存分配或机器码生成。
-- 实现由越狱侧（`../IOSDecryptHubJB/`）以独立扩展 dylib 提供，由加载器随引擎一起
+- 实现由越狱侧（`../IOSDecryptHub/`）以独立扩展 dylib 提供，由加载器随引擎一起
   `dlopen`；宿主环境不满足条件时该 dylib 根本不加载。
 - 事件出口不变：扩展把结果构造成既有事件条目写入 `DHLogStore`，WebUI 与 MCP 不需要
   知道来源。事件新增 `mechanism` 字段（`pointer` / `inline`）用于区分与排查。
@@ -158,8 +158,8 @@ dylib 运行在目标 App 进程中，任何异常都会直接终止宿主 App�
 |---------------|------|------|
 | `src/` | 共享 | 同一份 dylib 核心引擎 |
 | `app-trollstore/` | TrollStore | 管理器 App 与 Mach-O patch |
-| `jailbreak/` | Jailbreak | 私有入口：编译 dylib → 拷进开源仓 vendor → 打包 |
-| `../IOSDecryptHubJB/` | Jailbreak（开源） | 薄加载器、管理器 App、updater daemon、deb 打包；消费成品 dylib |
+| `jailbreak/` | Jailbreak | 兼容入口：转交 IOSDecryptHub 主仓完整构建 |
+| `../IOSDecryptHub/` | Jailbreak（开源） | 越狱引擎、Loader、Manager、updater 与完整 deb；自行编译引擎 |
 | `make` | dev | 默认开发 dylib |
 | `make VARIANT=trollstore` | TrollStore | 管理器内嵌 dylib |
 | `make VARIANT=rootless` | Jailbreak | 越狱加载器加载的共享 dylib |
@@ -178,7 +178,7 @@ dylib 运行在目标 App 进程中，任何异常都会直接终止宿主 App�
 | `main`（默认） | TrollStore 巨魔版 | `make VARIANT=trollstore`、`make ipa`；免越狱兼容性与稳定性 |
 | `jailbreak` | Jailbreak 越狱版 | `make VARIANT=rootless`、`make deb`；rootless / roothide 适配与高级分析扩展 |
 
-两条分支从同一现有基线开始；保留已有目录与构建入口。平台专属功能从对应维护分支开发并回到该分支，公共修复用 `git cherry-pick -x <commit>` 按需同步，分别验证，不整分支合回。GitHub Actions 分别构建 `trollstore` / `rootless` 变体并区分产物名称；deb 打包仍需并列 `IOSDecryptHubJB` 仓库与对应工具链。
+两条分支从同一现有基线开始；保留已有目录与构建入口。平台专属功能从对应维护分支开发并回到该分支，公共修复用 `git cherry-pick -x <commit>` 按需同步，分别验证，不整分支合回。GitHub Actions 分别构建 `trollstore` / `rootless` 变体并区分产物名称；当前 deb 兼容入口转交并列 `IOSDecryptHub` 主仓与对应工具链；本节其余双分支描述保留为历史。
 
 后续正式发布从对应分支打 `trollstore-v<版本号>` / `jailbreak-v<版本号>` 标签；历史 `v*` 标签保持不变。本次仅调整分支、文档与 CI，不增加功能版本号或发布二进制。
 

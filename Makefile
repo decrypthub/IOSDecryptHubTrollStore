@@ -278,8 +278,8 @@ ipa:
 	./app-trollstore/build_ipa.sh
 
 # ---------- 8) 越狱 deb 包 (rootless / roothide) ----------
-# 本仓只编译闭源 dylib。加载器 / 设置面板 / 打包在并列开源仓 IOSDecryptHubJB。
-# jailbreak/build_deb.sh 会把成品拷进 ../IOSDecryptHubJB/vendor/dylib/ 再调用其打包脚本。
+# 旧入口只转交并列 IOSDecryptHub 的完整构建；本仓巨魔产物与版本不参与越狱打包。
+# jailbreak/build_deb.sh 不修改越狱版本、不跨仓复制引擎或产物。
 deb:
 	@chmod +x jailbreak/build_deb.sh
 	./jailbreak/build_deb.sh all
