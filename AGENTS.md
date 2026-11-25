@@ -3,7 +3,7 @@
 Always respond in Chinese-simplified
 
 > **开始任何代码变更前，必须先读 `docs/ARCHITECTURE_BOUNDARY.md`（架构铁律）。**
-> 本文件是仓库级开发指南；工作区级产品说明见上层 `../AGENTS.md`。
+> 本文件是仓库级开发指南；工作区级产品说明见上层 `../../AGENTS.md`。
 
 ---
 
